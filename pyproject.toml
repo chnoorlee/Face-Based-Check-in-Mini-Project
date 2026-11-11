@@ -1,7 +1,7 @@
 # 项目元信息与工具配置（pip install -e . 可选；运行主程序不依赖本文件）
 [project]
 name = "face-checkin"
-version = "1.1.0"
+version = "1.2.0"
 description = "课堂自动人脸签到系统（课程 3320）：YOLO-Face 人脸检测 + SFace 特征比对"
 requires-python = ">=3.9"
 dependencies = [

@@ -69,6 +69,26 @@ class FeatureDatabase:
         """已注册学生姓名列表"""
         return [p.stem for p in sorted(self.embeddings_dir.glob("*.npy"))]
 
+    def delete(self, name) -> bool:
+        """删除学生（特征向量 + 人脸照片）。返回是否有记录被删除。"""
+        fname = sanitize_filename(name)
+        removed = False
+        for p in (self.embeddings_dir / f"{fname}.npy", self.faces_dir / f"{fname}.jpg"):
+            if p.exists():
+                p.unlink()
+                removed = True
+        return removed
+
+    def details(self) -> list:
+        """已注册学生详情列表：[{name, registered_at}]（注册时间取特征文件的修改时间）"""
+        infos = []
+        for p in sorted(self.embeddings_dir.glob("*.npy")):
+            infos.append({
+                "name": p.stem,
+                "registered_at": datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            })
+        return infos
+
 
 class AttendanceRecorder:
     """签到记录器：每天一个 CSV 文件（attendance_YYYY-MM-DD.csv）

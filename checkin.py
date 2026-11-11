@@ -230,6 +230,10 @@ def main():
                         help=f"识别阈值（欧氏距离，默认 {MATCH_TOLERANCE}，越小越严格）")
     args = parser.parse_args()
 
+    if not 0 < args.tolerance <= 2:
+        print("❌ --tolerance 必须在 (0, 2] 范围内（归一化特征欧氏距离取值 0~2）")
+        return 1
+
     source = args.source
     if source is not None and source.isdigit():
         source = int(source)

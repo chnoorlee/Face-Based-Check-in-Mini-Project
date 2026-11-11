@@ -32,7 +32,8 @@ BANNER = """
 MENU = """  1. 人脸注册    （上传照片，录入特征库）
   2. 实时签到    （摄像头自动识别签到）
   3. 查看信息    （特征库与今日签到记录）
-  4. 退出
+  4. 删除学生    （从特征库移除）
+  5. 退出
 =========================================
 """
 
@@ -68,15 +69,30 @@ def cmd_checkin():
 
 
 def cmd_info():
-    """功能 3：查看特征库与今日签到记录"""
+    """功能 3：查看特征库详情与今日签到记录"""
     from utils.storage import AttendanceRecorder, FeatureDatabase
     db = FeatureDatabase()
-    names = db.names()
-    print(f"\n已注册学生（{len(names)} 人）：{'、'.join(names) or '（空）'}")
+    infos = db.details()
     recorder = AttendanceRecorder()
     checked = recorder.load_checked_names()
-    print(f"今日已签到（{len(checked)} 人）：{'、'.join(sorted(checked)) or '（暂无）'}")
+    print("\n已注册学生（{} 人）：".format(len(infos)))
+    if not infos:
+        print("  （空）")
+    for info in infos:
+        status = "✅ 今日已签到" if info["name"] in checked else "— 今日未签到"
+        print(f"  - {info['name']}（注册于 {info['registered_at']}）{status}")
     print(f"签到文件：{recorder.path}\n")
+
+
+def cmd_delete():
+    """功能 4：删除学生"""
+    from utils.storage import FeatureDatabase
+    name = input("请输入要删除的学生姓名: ").strip()
+    if not name:
+        print("❌ 姓名不能为空")
+        return
+    removed = FeatureDatabase().delete(name)
+    print(f"✅ 已删除学生：{name}" if removed else f"❌ 特征库中没有学生：{name}")
 
 
 def main():
@@ -84,21 +100,21 @@ def main():
     for warning in validate_config():
         print("⚠️ 配置警告：", warning)
     print(BANNER)
-    handlers = {"1": cmd_register, "2": cmd_checkin, "3": cmd_info}
+    handlers = {"1": cmd_register, "2": cmd_checkin, "3": cmd_info, "4": cmd_delete}
     while True:
         print(MENU)
         try:
-            choice = input("请选择功能 [1-4]: ").strip()
+            choice = input("请选择功能 [1-5]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n再见！")
             break
         if choice in handlers:
             handlers[choice]()
-        elif choice == "4":
+        elif choice == "5":
             print("再见！")
             break
         else:
-            print("输入无效，请输入 1-4\n")
+            print("输入无效，请输入 1-5\n")
 
 
 if __name__ == "__main__":

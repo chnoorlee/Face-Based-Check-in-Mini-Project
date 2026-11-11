@@ -51,6 +51,25 @@ class TestFeatureDatabase:
         assert len(db.names()) == 1
         np.testing.assert_array_equal(db.load_all()["张三"], np.zeros(128))
 
+    def test_delete_removes_all_files(self, tmp_path):
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张三", np.ones(128), _make_image())
+        assert db.delete("张三")
+        assert db.names() == []
+        assert not (db.faces_dir / "张三.jpg").exists()
+
+    def test_delete_unknown_returns_false(self, tmp_path):
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        assert not db.delete("不存在的人")
+
+    def test_details_include_registered_at(self, tmp_path):
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张三", np.ones(128), _make_image())
+        infos = db.details()
+        assert len(infos) == 1
+        assert infos[0]["name"] == "张三"
+        assert "registered_at" in infos[0] and "20" in infos[0]["registered_at"]
+
 
 class TestAttendanceRecorder:
     def test_record_writes_header_once(self, tmp_path):

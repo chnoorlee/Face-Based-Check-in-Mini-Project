@@ -88,7 +88,28 @@ def main():
     parser = argparse.ArgumentParser(description="课堂人脸签到系统 - 人脸注册模块")
     parser.add_argument("--image", "-i", help="人脸照片路径（支持中文路径）")
     parser.add_argument("--name", "-n", help="学生姓名")
+    parser.add_argument("--list", "-l", action="store_true", help="列出已注册学生与注册时间")
+    parser.add_argument("--delete", "-d", metavar="姓名", help="删除已注册学生")
     args = parser.parse_args()
+
+    db = FeatureDatabase()
+    if args.list:
+        infos = db.details()
+        if not infos:
+            print("特征库为空，还没有注册学生")
+            return 0
+        print(f"已注册学生（{len(infos)} 人）：")
+        for info in infos:
+            print(f"  - {info['name']}（注册于 {info['registered_at']}）")
+        return 0
+
+    if args.delete:
+        removed = db.delete(args.delete)
+        if removed:
+            print(f"✅ 已删除学生：{args.delete}")
+            return 0
+        print(f"❌ 特征库中没有学生：{args.delete}")
+        return 1
 
     # 未通过命令行传参时，交互式询问
     image_path = args.image or input("请输入人脸照片路径（可把文件拖进窗口）: ").strip().strip('"')

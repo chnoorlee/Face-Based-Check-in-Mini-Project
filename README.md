@@ -103,7 +103,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-按菜单选择：`1` 人脸注册 → `2` 实时签到 → `3` 查看记录。
+按菜单选择：`1` 人脸注册 → `2` 实时签到 → `3` 查看信息（注册时间 + 今日出勤）→ `4` 删除学生 → `5` 退出。
 
 ### 方式二：直接运行各模块
 
@@ -161,11 +161,14 @@ python gui.py
 | 命令 | 说明 |
 |------|------|
 | `python register.py -i 照片.jpg -n 张三` | 注册学生（-i 照片路径，-n 姓名） |
+| `python register.py --list` | 列出已注册学生与注册时间 |
+| `python register.py --delete 张三` | 删除学生 |
 | `python checkin.py` | 摄像头实时签到 |
+| `python checkin.py -t 1.2` | 指定识别阈值（临时覆盖 config，取值 (0, 2]） |
 | `python checkin.py --source 视频.mp4 --no-window` | 用视频文件演示签到，不显示画面窗口 |
 | `python main.py` | 控制台菜单 |
 | `python gui.py` | 图形界面 |
-| `python -m pytest tests/ -v` | 运行单元测试（需 pip install pytest） |
+| `python -m pytest tests/ -v` | 运行单元测试（需 pip install pytest pytest-cov） |
 
 ## 6. 核心原理
 
