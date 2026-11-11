@@ -35,9 +35,9 @@ except Exception:
 
 import cv2  # noqa: E402
 
-from config import (CAMERA_INDEX, COOLDOWN_SECONDS, MATCH_TOLERANCE,  # noqa: E402
-                    SHOW_WINDOW, WINDOW_NAME, late_after as config_late_after,
-                    validate_config)
+from config import (CAMERA_INDEX, COOLDOWN_SECONDS, FACES_DIR,  # noqa: E402
+                    MATCH_TOLERANCE, SHOW_WINDOW, WINDOW_NAME,
+                    late_after as config_late_after, validate_config)
 from utils.drawing import (RosterPanel, attach_roster_panel,  # noqa: E402
                            draw_detections)
 from utils.face_detector import FaceDetector  # noqa: E402
@@ -225,7 +225,7 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE,
 
     print("开始实时签到...（按 q 退出）")
     frames, t0, show = 0, time.monotonic(), show_window
-    panel = RosterPanel()
+    panel = RosterPanel(faces_dir=FACES_DIR)
     ever_visible = False   # 窗口是否曾经可见（用于区分"窗口被用户关闭"与"环境本就不显示窗口"）
     try:
         while True:

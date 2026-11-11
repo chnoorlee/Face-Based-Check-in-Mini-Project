@@ -9,6 +9,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from utils.imutils import sanitize_filename
+
 try:
     from PIL import Image, ImageDraw, ImageFont
     _PIL_AVAILABLE = True
@@ -58,20 +60,57 @@ def _put_text_fallback(frame, text, pos, color_bgr):
 
 
 class RosterPanel:
-    """签到名单侧栏：显示应到学生与打勾状态。
+    """签到名单侧栏：显示应到学生、人脸头像与打勾状态。
 
-    画面右侧显示「应到 X 人 / 已到 Y 人」和逐人勾选状态，签到成功即打勾。
+    画面右侧显示「已到 X / 应到 Y」和逐人条目：
+    [头像] 姓名 ............ [✓]
+    签到成功即打勾（绿色勾），未签到为灰色空心框。
     侧栏图像带缓存，只有签到状态变化时才重绘，不影响实时帧率。
     """
 
-    ROW_H = 34
-    MAX_ROWS = 18   # 名单过长时只显示前 N 人，其余在控制台查看
+    ROW_H = 42
+    MAX_ROWS = 14   # 名单过长时只显示前 N 人，其余在控制台查看
+    THUMB = 34      # 头像直径
 
-    def __init__(self, title="签到名单", width=250):
+    def __init__(self, title="签到名单", width=300, faces_dir=None):
         self.title = title
         self.width = width
+        self.faces_dir = Path(faces_dir) if faces_dir else None
         self._cache_key = None
         self._cache_img = None
+        self._thumbs = {}
+        self._mask = None
+
+    # ---------- 头像 ----------
+    def _thumb(self, name):
+        """加载学生头像（圆形），带缓存；无照片时返回 None"""
+        if name in self._thumbs:
+            return self._thumbs[name]
+        img = None
+        if self.faces_dir is not None:
+            for candidate in (f"{sanitize_filename(name)}.jpg",
+                              f"{sanitize_filename(name)}_1.jpg"):
+                path = self.faces_dir / candidate
+                if path.exists():
+                    try:
+                        src = Image.open(path).convert("RGB")
+                        w, h = src.size
+                        side = min(w, h)
+                        src = src.crop(((w - side) // 2, (h - side) // 2,
+                                        (w + side) // 2, (h + side) // 2))
+                        img = src.resize((self.THUMB, self.THUMB), Image.LANCZOS)
+                    except (OSError, ValueError):
+                        img = None
+                    break
+        self._thumbs[name] = img
+        return img
+
+    def _circle_mask(self):
+        if self._mask is None:
+            mask = Image.new("L", (self.THUMB, self.THUMB), 0)
+            ImageDraw.Draw(mask).ellipse((0, 0, self.THUMB - 1, self.THUMB - 1), fill=255)
+            self._mask = mask
+        return self._mask
 
     def render(self, names, checked):
         """返回侧栏图像（OpenCV BGR 格式）；Pillow 不可用时返回 None（不显示侧栏）"""
@@ -93,22 +132,45 @@ class RosterPanel:
         draw.rectangle([0, 0, self.width - 1, height - 1], outline=(48, 60, 92))
 
         present = sum(1 for n in names if n in checked)
-        draw.text((14, 12), self.title, font=_load_font(20) or ImageFont.load_default(),
+        draw.text((14, 10), self.title, font=_load_font(20) or ImageFont.load_default(),
                   fill=(232, 236, 248))
         draw.text((14, 42), f"已到 {present} / {len(names)} 人",
                   font=_load_font(16) or ImageFont.load_default(), fill=(151, 161, 189))
 
         font = _load_font(17) or ImageFont.load_default()
-        y = 78
+        mask = self._circle_mask()
+        y = 72
         for name in shown:
             done = name in checked
             color = (61, 214, 140) if done else (110, 120, 145)
-            # 勾选框
-            draw.rounded_rectangle([14, y + 5, 31, y + 22], radius=5, outline=color, width=2)
+            text_color = (232, 236, 248) if done else (151, 161, 189)
+
+            # 已签到：整行淡绿背景，一眼就能看出谁到了
+            if done:
+                draw.rounded_rectangle([8, y, self.width - 10, y + self.ROW_H - 4],
+                                       radius=8, fill=(24, 44, 40))
+
+            # 头像（无照片时画一个灰色圆圈 + 姓名首字）
+            thumb = self._thumb(name)
+            tx, ty = 14, y + 3
+            if thumb is not None:
+                img.paste(thumb, (tx, ty), mask)
+            else:
+                draw.ellipse([tx, ty, tx + self.THUMB - 1, ty + self.THUMB - 1],
+                             fill=(40, 48, 70), outline=color, width=1)
+                draw.text((tx + 10, ty + 8), name[:1], font=font, fill=text_color)
+
+            # 姓名
+            draw.text((tx + self.THUMB + 10, y + 9), name, font=font, fill=text_color)
+
+            # 右侧勾选框
+            bx = self.width - 40
+            draw.rounded_rectangle([bx, y + 9, bx + 20, y + 29], radius=6,
+                                   outline=color, width=2,
+                                   fill=(32, 74, 56) if done else None)
             if done:   # 打勾
-                draw.line([(17, y + 14), (21, y + 18), (28, y + 9)], fill=color, width=3)
-            draw.text((41, y), name, font=font,
-                      fill=(232, 236, 248) if done else (151, 161, 189))
+                draw.line([(bx + 4, y + 19), (bx + 9, y + 24), (bx + 17, y + 13)],
+                          fill=color, width=3)
             y += self.ROW_H
 
         if overflow > 0:

@@ -6,11 +6,13 @@ __pycache__/
 venv/
 .pytest_cache/
 
-# 本地运行数据（注册照片、特征库、签到记录、日志不入库）
-data/faces/*
-data/embeddings/*
-data/attendance/*
-data/logs/*
+# 本地运行数据（含人脸照片等隐私内容，整个 data 目录都不入库）
+# 只放行各子目录的占位文件；data 下任何截图/导出文件都不会被误提交
+data/*
+!data/faces/.gitkeep
+!data/embeddings/.gitkeep
+!data/attendance/.gitkeep
+!data/logs/.gitkeep
 !data/faces/.gitkeep
 !data/embeddings/.gitkeep
 !data/attendance/.gitkeep

@@ -80,8 +80,8 @@
         <div class="icon" style="--ic:#3dd7f2">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2.5"/><path d="M16 10.5 22 7v10l-6-3.5"/></svg>
         </div>
-        <h3>摄像头实时签到</h3>
-        <p>调用本地摄像头实时画面，逐帧检测人脸并与特征库比对。识别成功自动签到并写入 CSV，画面实时标注姓名与置信距离。</p>
+        <h3>摄像头实时签到 · 一键启动</h3>
+        <p>双击 <code>启动签到.bat</code> 直接进入签到，无需菜单。调用本地摄像头逐帧检测比对，识别成功即在右侧名单该生条目上打勾、整行变绿，同时写入 CSV。</p>
       </div>
       <div class="card wide reveal">
         <div class="icon" style="--ic:#3dd68c">
@@ -193,7 +193,7 @@
 <section id="quickstart" class="section alt">
   <div class="container">
     <h2 class="reveal">快速开始</h2>
-    <p class="lead reveal">三步跑起来。首次运行会自动下载 3 个模型文件（共约 43MB，含备用地址）。</p>
+    <p class="lead reveal">装好依赖后，<b>双击「启动签到.bat」</b>即可——直接打开摄像头，人站到镜头前自动打勾。<br>首次运行会自动下载 3 个模型文件（共约 43MB，含备用地址）。</p>
     <div class="term reveal">
       <div class="term-bar"><span></span><span></span><span></span><span class="term-title">Windows · Python 3.10+</span></div>
       <div class="term-line">

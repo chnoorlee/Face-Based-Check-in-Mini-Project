@@ -33,7 +33,7 @@ except ImportError:
     raise SystemExit(1)
 
 from checkin import CheckinEngine  # noqa: E402
-from config import CAMERA_INDEX  # noqa: E402
+from config import CAMERA_INDEX, FACES_DIR  # noqa: E402
 from register import register_face  # noqa: E402
 from utils.drawing import (RosterPanel, attach_roster_panel,  # noqa: E402
                            draw_detections)
@@ -92,17 +92,26 @@ class CheckinWindow(tk.Toplevel):
     TICK_MS = 10       # 每 10ms 处理一帧
     MAX_WIDTH = 720    # 画面显示的最大宽度（等比缩放）
 
-    def __init__(self, master):
+    def __init__(self, master, standalone=False):
         super().__init__(master)
-        self.title("实时签到")
-        self.geometry("780x640")
+        self.standalone = standalone     # True = 一键启动模式（本窗口即主窗口）
+        self._closed = False
+        if standalone:
+            self.title("课堂人脸签到 · 站到摄像头前即可签到（关闭窗口退出）")
+            try:
+                self.state("zoomed")     # Windows 最大化，方便投影到教室屏幕
+            except tk.TclError:
+                self.geometry("1100x760")
+        else:
+            self.title("实时签到")
+            self.geometry("780x640")
         self.protocol("WM_DELETE_WINDOW", self._stop)
         self.running = False
         self.cap = None
         self.engine = None
 
         self.video_label = ttk.Label(self)
-        self.video_label.pack(padx=10, pady=6)
+        self.video_label.pack(padx=10, pady=6, expand=True)
         self.info_var = tk.StringVar(value="正在加载检测模型，请稍候…")
         ttk.Label(self, textvariable=self.info_var).pack()
         self.log_text = tk.Text(self, height=7, state="disabled")
@@ -120,7 +129,22 @@ class CheckinWindow(tk.Toplevel):
     def _fail(self, msg):
         """初始化失败：提示并关闭窗口（统一出口，避免窗口卡在"加载中"）"""
         messagebox.showerror("错误", msg)
-        self.destroy()
+        self._close()
+
+    def _close(self):
+        """关闭窗口；一键启动模式下同时结束整个程序"""
+        if self._closed:
+            return
+        self._closed = True
+        self.running = False
+        try:
+            self.destroy()
+        finally:
+            if self.standalone:
+                try:
+                    self.master.destroy()
+                except tk.TclError:
+                    pass
 
     def _init(self):
         """初始化检测模型、特征库与摄像头（任何异常都要给出可见提示）"""
@@ -148,7 +172,7 @@ class CheckinWindow(tk.Toplevel):
                 return
             self.engine, self.cap, self.running = engine, cap, True
             self.roster = Roster.from_database(database)   # 应到名单 = 全部已注册学生
-            self.panel = RosterPanel()
+            self.panel = RosterPanel(faces_dir=FACES_DIR)
             self.info_var.set(f"检测后端：{detector.backend} | 应到 {len(self.roster)} 人"
                               f" | 已到 {self.roster.progress_text(engine.checked_today)}")
         except (RuntimeError, cv2.error, OSError) as exc:
@@ -204,8 +228,7 @@ class CheckinWindow(tk.Toplevel):
 
         报告写入失败不能影响摄像头释放与窗口关闭，因此清理放在 finally。
         """
-        if not self.running and self.cap is None:
-            self.destroy()
+        if self._closed:
             return
         self.running = False
         try:
@@ -215,16 +238,16 @@ class CheckinWindow(tk.Toplevel):
                         self.roster.names, self.engine.checked_today, self.roster.on_leave())
                     present = self.roster.present(self.engine.checked_today)
                     absent = self.roster.absent(self.engine.checked_today)
-                    self._log(f"出勤：应到 {len(self.roster)} | 实到 {len(present)} | 缺勤 {len(absent)}")
-                    self._log(f"未到：{'、'.join(absent) or '无'}")
-                    self._log(f"报告：{report}" if report else "⚠️ 签到记录读取失败，未生成报告")
+                    logger_msg = (f"出勤：应到 {len(self.roster)} | 实到 {len(present)} "
+                                  f"| 缺勤 {len(absent)} | 未到：{'、'.join(absent) or '无'}")
+                    print(logger_msg)          # 无控制台时也写入日志文件
                 except OSError as exc:
-                    self._log(f"⚠️ 出勤报告写入失败：{exc}")
+                    print(f"⚠️ 出勤报告写入失败：{exc}")
         finally:
             if self.cap is not None:
                 self.cap.release()
                 self.cap = None
-            self.destroy()
+            self._close()
 
 
 class App(tk.Tk):
