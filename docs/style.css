@@ -257,6 +257,7 @@ h2 { font-size: clamp(26px, 3.4vw, 36px); font-weight: 800; text-align: center; 
 .term-out .ok { color: var(--green); }
 .term-out .dim { color: var(--amber); }
 .term-out .bad { color: var(--red); }
+.term-out .warn { color: var(--amber); }
 .hint { text-align: center; color: var(--muted); font-size: 14px; margin-top: 26px; }
 
 /* ---------- 实测数据 ---------- */

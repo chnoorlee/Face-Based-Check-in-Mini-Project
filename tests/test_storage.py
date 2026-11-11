@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 
-from utils.storage import AttendanceRecorder, FeatureDatabase
+from utils.storage import AttendanceRecorder, FeatureDatabase, is_late
 
 
 def _make_image():
@@ -136,3 +136,51 @@ class TestAttendanceRecorder:
         lines = path.read_text(encoding="utf-8-sig").strip().splitlines()
         assert len(lines) == 3
         assert all("缺勤" in line for line in lines[1:])
+
+    def test_write_summary_marks_leave(self, tmp_path):
+        rec = AttendanceRecorder(tmp_path)
+        path = rec.write_summary(["张三", "李四"], {"张三"}, leave_names=["李四"])
+        lines = path.read_text(encoding="utf-8-sig").strip().splitlines()
+        assert lines[2] == "李四,请假,"
+
+    def test_write_summary_marks_late(self, tmp_path):
+        from datetime import time
+        rec = AttendanceRecorder(tmp_path)
+        rec.path.write_text(
+            "学生姓名,签到时间,是否签到成功\n"
+            "张三,2026-11-11 08:05:00,是\n"
+            "李四,2026-11-11 08:30:00,是\n",
+            encoding="utf-8-sig")
+        path = rec.write_summary(["张三", "李四"], {"张三", "李四"},
+                                 late_after=time(8, 10))
+        text = path.read_text(encoding="utf-8-sig")
+        assert "张三,已到,2026-11-11 08:05:00" in text
+        assert "李四,迟到,2026-11-11 08:30:00" in text
+
+    def test_is_late_helper(self):
+        from datetime import time
+        assert not is_late("2026-11-11 08:05:00", time(8, 10))
+        assert is_late("2026-11-11 08:15:00", time(8, 10))
+        assert not is_late("2026-11-11 08:15:00", None)
+        assert not is_late("", time(8, 10))
+        assert not is_late("乱码时间", time(8, 10))
+
+
+class TestSession:
+    def test_session_in_filename(self, tmp_path):
+        rec = AttendanceRecorder(tmp_path, session="第1节")
+        assert rec.path.name == "attendance_" + rec.date + "_第1节.csv"
+        assert rec.report_path().name == "attendance_" + rec.date + "_第1节_report.csv"
+
+    def test_no_session_keeps_legacy_name(self, tmp_path):
+        rec = AttendanceRecorder(tmp_path)
+        assert rec.path.name == "attendance_" + rec.date + ".csv"
+
+    def test_two_sessions_are_independent(self, tmp_path):
+        s1 = AttendanceRecorder(tmp_path, session="第1节")
+        s2 = AttendanceRecorder(tmp_path, session="第2节")
+        s1.record("张三")
+        assert s1.load_checked_names() == {"张三"}
+        assert s2.load_checked_names() == set()   # 第2节不受第1节影响
+        s2.record("张三")
+        assert s2.load_checked_names() == {"张三"}

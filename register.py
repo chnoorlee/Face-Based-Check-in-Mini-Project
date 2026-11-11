@@ -27,7 +27,7 @@ except Exception:
 from config import LOG_DIR  # noqa: E402
 from utils.face_detector import FaceDetector  # noqa: E402
 from utils.face_embedder import FaceEmbedder  # noqa: E402
-from utils.imutils import ensure_dirs, imread_unicode  # noqa: E402
+from utils.imutils import ensure_dirs, imread_unicode, sanitize_filename  # noqa: E402
 from utils.storage import FeatureDatabase  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,10 @@ def register_face(image_path: str, name: str):
     detail = f"注册成功！姓名：{name} | 检测后端：{detector.backend}"
     if overwritten:
         detail += "（已覆盖同名旧记录）"
+    # 姓名含特殊字符时，文件会被改名保存；提醒可能与其他学生撞名（覆盖）
+    if sanitize_filename(name) != name:
+        detail += (f"\n⚠️ 姓名含特殊字符，特征文件将保存为「{sanitize_filename(name)}.npy」；"
+                   f"若已有同名文件会被覆盖，建议改用简短姓名")
     return True, detail
 
 

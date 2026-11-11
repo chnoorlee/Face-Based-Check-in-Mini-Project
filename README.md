@@ -11,7 +11,11 @@
 - **人脸注册模块**：上传静态照片 → YOLO-Face 检测人脸 → 提取 128 维人脸特征 → 保存到本地特征库
 - **实时签到模块**：调用本地摄像头实时画面 → YOLO-Face 检测画面中的人脸 → 与特征库比对识别 → 自动完成签到
 - **自动打勾**：画面右侧名单侧栏，识别到本人立刻打 ✅，实时显示「已到 X / 应到 Y」
-- **缺勤名单**：签到结束时自动输出**没来的人**，并生成出勤报告 CSV（已到 / 缺勤）
+- **四态考勤**：已到 / **迟到**（超过上课时间 + 宽限）/ **请假** / 缺勤
+- **缺勤名单**：签到结束时自动输出**没来的人**，并生成出勤报告 CSV
+- **节次支持**：同一天多节课用 `--session 第1节`，签到去重按节次独立，互不影响
+- **出勤统计**：`stats.py` 汇总历史课次，输出每人出勤率表（含迟到/请假次数）
+- **环境自检**：`doctor.py` 一键检查依赖、模型、摄像头、字体、目录权限
 - **防重复签到**：冷却期 + 每日去重，同一学生短时间内不会重复签到
 - **签到记录**：本地 CSV 表格（学生姓名 / 签到时间 / 是否签到成功），Excel 可直接打开
 - **未知人员**：未匹配特征库的人脸在画面中标记为「未知人员」，不写入签到记录
@@ -28,14 +32,16 @@ face/
 ├── register.py                # 人脸注册模块（静态图片）
 ├── checkin.py                 # 实时签到模块（摄像头 / 视频流）
 ├── main.py                    # 控制台主菜单入口
+├── stats.py                   # 出勤统计报表（历史出勤率 CSV）
+├── doctor.py                  # 环境自检（依赖/模型/摄像头/字体）
 ├── gui.py                     # 可选 tkinter 图形界面
 ├── requirements.txt           # 依赖清单
 ├── pyproject.toml             # 项目元信息与 pytest 配置
 ├── utils/
 │   ├── face_detector.py       # YOLO-Face 人脸检测（模型缺失时自动回退 Haar）
 │   ├── face_embedder.py       # 人脸特征提取（SFace + YuNet 对齐，OpenCV DNN）
-│   ├── storage.py             # 特征库读写 + 签到 CSV + 出勤报告 + 特征比对
-│   ├── roster.py              # 应到名单（文件/特征库）与出勤统计（已到/缺勤）
+│   ├── storage.py             # 特征库 + 签到 CSV（含节次）+ 四态出勤报告 + 特征比对
+│   ├── roster.py              # 应到名单（文件/特征库）、请假登记与出勤统计
 │   ├── drawing.py             # 画面标注（识别框 + 姓名标签 + 名单打勾侧栏）
 │   └── imutils.py             # 中文路径图片读写、模型下载等小工具
 ├── scripts/
@@ -138,8 +144,9 @@ python register.py -i 自己的照片.jpg -n 张三
 **第二步：实时签到（摄像头动态识别）**
 
 ```bash
-python checkin.py                      # 应到名单 = 全部已注册学生
-python checkin.py --roster 名单.txt     # 指定本次课堂应到名单
+python checkin.py                                    # 应到名单 = 全部已注册学生
+python checkin.py --roster 名单.txt                   # 指定本次课堂应到名单
+python checkin.py -S 第1节 --leave 王五 --start 08:00  # 节次 + 请假 + 上课时间（判迟到）
 ```
 
 画面中会实时出现识别结果，右侧是**签到名单侧栏**（谁到了就打勾）：
@@ -152,12 +159,18 @@ python checkin.py --roster 名单.txt     # 指定本次课堂应到名单
 
 ```
 ==============================================
-出勤：应到 30 人 | 实到 26 人 | 缺勤 4 人
-✅ 已到（26）：张三、李四、王五、……
-❌ 未到（4）：赵六、钱七、孙八、周九
-签到明细：data\attendance\attendance_2026-11-11.csv
-出勤报告：data\attendance\attendance_2026-11-11_report.csv
+出勤：应到 3 人 | 实到 1 人 | 请假 1 人 | 缺勤 1 人
+✅ 已到（1），其中迟到 1 人：张三
+⏰ 迟到（1）：张三
+📝 请假（1）：王五
+❌ 未到（1）：李四
+签到明细：data\attendance\attendance_2026-11-11_第1节.csv
+出勤报告：data\attendance\attendance_2026-11-11_第1节_report.csv
 ```
+
+> **一天多节课**：用 `-S 第1节` / `-S 第2节` 区分节次，记录分文件存放，去重互不影响——同一学生上午签过，下午仍能正常签到。
+>
+> **迟到判定**：签到时间晚于「上课时间 + 迟到宽限」（默认 08:00 + 10 分钟）记为迟到，可在 `config.py` 或 `--start` 调整。
 
 **第三步：查看签到记录**
 
@@ -193,7 +206,12 @@ python gui.py
 | `python register.py --delete 张三` | 删除学生 |
 | `python checkin.py` | 摄像头实时签到（应到名单 = 全部已注册学生） |
 | `python checkin.py --roster 名单.txt` | 指定本次课堂应到名单（.txt 每行一个 / .csv 第一列） |
+| `python checkin.py -S 第1节` | 指定节次（同日多节课互不影响） |
+| `python checkin.py -L 王五 -L 赵六` | 登记请假（可重复） |
+| `python checkin.py --start 13:30` | 指定上课时间，用于判定迟到 |
 | `python checkin.py -t 1.2` | 指定识别阈值（临时覆盖 config，取值 (0, 2]） |
+| `python stats.py --roster 名单.txt` | 汇总历史出勤率并导出 `出勤统计.csv` |
+| `python doctor.py` | 环境自检（依赖 / 模型 / 摄像头 / 字体 / 目录） |
 | `python checkin.py --source 视频.mp4 --no-window` | 用视频文件演示签到，不显示画面窗口 |
 | `python main.py` | 控制台菜单 |
 | `python gui.py` | 图形界面 |
@@ -249,6 +267,8 @@ python checkin.py --source demo.mp4 --no-window
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `MATCH_TOLERANCE` | 1.0 | 识别阈值（欧氏距离，特征已归一化取值 0~2）。认不出自己 → 调大到 1.2；误识别 → 调小到 0.8 |
+| `CLASS_START_TIME` | `"08:00"` | 上课时间，用于判定迟到（也可用 `--start` 临时覆盖） |
+| `LATE_GRACE_MINUTES` | 10 | 迟到宽限（分钟）：08:10 之后签到记为迟到 |
 | `COOLDOWN_SECONDS` | 60 | 同一学生重复签到的冷却时间（秒） |
 | `DETECT_CONFIDENCE` | 0.5 | YOLO 检测置信度阈值 |
 | `CAMERA_INDEX` | 0 | 摄像头编号（外接摄像头可改为 1） |

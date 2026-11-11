@@ -36,14 +36,15 @@ except Exception:
 import cv2  # noqa: E402
 
 from config import (CAMERA_INDEX, COOLDOWN_SECONDS, MATCH_TOLERANCE,  # noqa: E402
-                    SHOW_WINDOW, WINDOW_NAME, validate_config)
+                    SHOW_WINDOW, WINDOW_NAME, late_after as config_late_after,
+                    validate_config)
 from utils.drawing import (RosterPanel, attach_roster_panel,  # noqa: E402
                            draw_detections)
 from utils.face_detector import FaceDetector  # noqa: E402
 from utils.face_embedder import FaceEmbedder  # noqa: E402
 from utils.roster import Roster  # noqa: E402
 from utils.storage import (AttendanceRecorder, FeatureDatabase,  # noqa: E402
-                           find_best_match)
+                           find_best_match, is_late)
 
 logger = logging.getLogger(__name__)
 
@@ -130,12 +131,15 @@ class CheckinEngine:
 
 
 def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE,
-                roster=None):  # pragma: no cover - 摄像头/视频硬件循环
+                roster=None, session=None,
+                late_after=None):  # pragma: no cover - 摄像头/视频硬件循环
     """控制台方式运行实时签到。
 
     source：摄像头编号（int）或视频文件路径（str），None 表示使用默认摄像头。
     tolerance：识别阈值，可临时覆盖 config.py 中的 MATCH_TOLERANCE（便于课堂演示调参）。
     roster：应到名单（Roster 对象）。为 None 时取特征库中全部已注册学生。
+    session：节次名称（如「第1节」）。同一天多节课时用不同节次，去重互相独立。
+    late_after：迟到判定时刻（datetime.time）；None 时按 config 中的上课时间 + 宽限计算。
     返回退出码：0 成功，1 失败。
     """
     database = FeatureDatabase().load_all()
@@ -169,11 +173,18 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE,
         print("❌", exc)
         return 1
 
-    recorder = AttendanceRecorder()
+    recorder = AttendanceRecorder(session=session)
+    if session:
+        print(f"本节次：{session}（签到记录：{recorder.path.name}）")
+    if late_after is None:
+        late_after = config_late_after()
     engine = CheckinEngine(detector, embedder, database, recorder, tolerance=tolerance)
     print(f"今日已签到：{len(engine.checked_today)} 人；应到：{len(roster)} 人"
           f"（已到 {roster.progress_text(engine.checked_today)}）")
-    print(f"冷却时间：{engine.cooldown} 秒；识别阈值：{engine.tolerance}")
+    if roster.on_leave():
+        print(f"请假：{'、'.join(roster.on_leave())}")
+    print(f"冷却时间：{engine.cooldown} 秒；识别阈值：{engine.tolerance}"
+          + (f"；迟到线：{late_after:%H:%M}" if late_after else ""))
 
     cap = cv2.VideoCapture(source if source is not None else CAMERA_INDEX)
     if not cap.isOpened():
@@ -241,14 +252,24 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE,
         cv2.destroyAllWindows()
 
     elapsed = time.monotonic() - t0
+    records = recorder.load_records()
     present = roster.present(engine.checked_today)
+    on_leave = roster.on_leave()
     absent = roster.absent(engine.checked_today)
-    report_path = recorder.write_summary(roster.names, engine.checked_today)
+    late_names = [n for n in present if is_late(records.get(n, ""), late_after)]
+    report_path = recorder.write_summary(
+        roster.names, engine.checked_today, on_leave, late_after)
 
     print("=" * 46)
     print(f"本次运行新签到 {len(engine.new_today)} 人：{'、'.join(engine.new_today) or '无'}")
-    print(f"出勤：应到 {len(roster)} 人 | 实到 {len(present)} 人 | 缺勤 {len(absent)} 人")
-    print(f"✅ 已到（{len(present)}）：{'、'.join(present) or '无'}")
+    print(f"出勤：应到 {len(roster)} 人 | 实到 {len(present)} 人 | "
+          f"请假 {len(on_leave)} 人 | 缺勤 {len(absent)} 人")
+    print(f"✅ 已到（{len(present)}）{'，其中迟到 ' + str(len(late_names)) + ' 人' if late_names else ''}："
+          f"{'、'.join(present) or '无'}")
+    if late_names:
+        print(f"⏰ 迟到（{len(late_names)}）：{'、'.join(late_names)}")
+    if on_leave:
+        print(f"📝 请假（{len(on_leave)}）：{'、'.join(on_leave)}")
     print(f"❌ 未到（{len(absent)}）：{'、'.join(absent) or '无'}")
     print(f"签到明细：{recorder.path}")
     print(f"出勤报告：{report_path}")
@@ -267,16 +288,27 @@ def main():  # pragma: no cover - 命令行入口（手工实测覆盖）
                         help=f"识别阈值（欧氏距离，默认 {MATCH_TOLERANCE}，越小越严格）")
     parser.add_argument("--roster", "-r", metavar="名单文件",
                         help="应到名单（.txt 每行一个姓名 / .csv 第一列）；不指定则默认全部已注册学生")
+    parser.add_argument("--session", "-S", metavar="节次",
+                        help="节次名称，如「第1节」。同一天多节课用不同节次，签到去重互不影响")
+    parser.add_argument("--leave", "-L", action="append", default=[], metavar="姓名",
+                        help="登记请假（可重复使用：--leave 张三 --leave 李四）")
+    parser.add_argument("--start", metavar="HH:MM",
+                        help="本节课上课时间，用于判定迟到（默认取 config.CLASS_START_TIME）")
     args = parser.parse_args()
 
     if not 0 < args.tolerance <= 2:
         print("❌ --tolerance 必须在 (0, 2] 范围内（归一化特征欧氏距离取值 0~2）")
         return 1
 
+    late_after = config_late_after(args.start)
+    if args.start and late_after is None:
+        print("❌ --start 格式应为 HH:MM，例如 08:00")
+        return 1
+
     roster = None
     if args.roster:
         try:
-            roster = Roster.from_file(args.roster)
+            roster = Roster.from_file(args.roster, leave=args.leave)
         except (FileNotFoundError, ValueError) as exc:
             print("❌ 读取名单失败：", exc)
             return 1
@@ -284,12 +316,21 @@ def main():  # pragma: no cover - 命令行入口（手工实测覆盖）
             print("❌ 名单文件为空：", args.roster)
             return 1
         print(f"已加载应到名单：{args.roster}（{len(roster)} 人）")
+    elif args.leave:
+        # 未指定名单文件：请假名单在加载特征库后再收敛（只保留名单内的学生）
+        pass
 
     source = args.source
     if source is not None and source.isdigit():
         source = int(source)
+
+    if roster is None and args.leave:
+        from utils.storage import FeatureDatabase as _DB
+        roster = Roster.from_database(_DB().load_all(), leave=args.leave)
+
     return run_console(source=source, show_window=not args.no_window,
-                       tolerance=args.tolerance, roster=roster)
+                       tolerance=args.tolerance, roster=roster,
+                       session=args.session, late_after=late_after)
 
 
 if __name__ == "__main__":

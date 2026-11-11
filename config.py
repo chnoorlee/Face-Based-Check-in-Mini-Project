@@ -56,6 +56,12 @@ CAMERA_INDEX = 0         # 摄像头编号：笔记本内置一般为 0，外接
 SHOW_WINDOW = True       # 是否显示实时画面窗口（无图形环境时改为 False）
 WINDOW_NAME = "课堂人脸签到 - 按 q 退出"
 
+# ---------- 考勤规则 ----------
+# 上课时间（HH:MM）：在此时间 + 迟到宽限之后签到，记为「迟到」
+CLASS_START_TIME = "08:00"
+# 迟到宽限（分钟）：8:10 之后签到算迟到；设为 0 表示一过上课时间就算迟到
+LATE_GRACE_MINUTES = 10
+
 
 def validate_config():
     """启动前校验配置取值范围，返回警告信息列表（空列表表示全部合法）。"""
@@ -68,4 +74,32 @@ def validate_config():
         warnings.append(f"DETECT_CONFIDENCE={DETECT_CONFIDENCE} 必须在 (0, 1] 范围内（置信度概率）")
     if not isinstance(CAMERA_INDEX, int) or CAMERA_INDEX < -1:
         warnings.append(f"CAMERA_INDEX={CAMERA_INDEX!r} 应为非负整数（外接摄像头一般用 0 或 1）")
+    if LATE_GRACE_MINUTES < 0:
+        warnings.append(f"LATE_GRACE_MINUTES={LATE_GRACE_MINUTES} 不能为负数")
+    try:
+        parse_class_start(CLASS_START_TIME)
+    except ValueError:
+        warnings.append(f"CLASS_START_TIME={CLASS_START_TIME!r} 格式应为 HH:MM，例如 \"08:00\"")
     return warnings
+
+
+def parse_class_start(value=None):
+    """把 "HH:MM" 解析为 datetime.time；非法格式抛 ValueError。"""
+    from datetime import time
+    raw = CLASS_START_TIME if value is None else value
+    try:
+        hh, mm = str(raw).strip().split(":")
+        return time(int(hh), int(mm))
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"时间格式应为 HH:MM：{raw!r}") from exc
+
+
+def late_after(value=None):
+    """返回「迟到判定时刻」= 上课时间 + 迟到宽限；格式非法时返回 None（不判定迟到）。"""
+    from datetime import datetime, timedelta
+    try:
+        start = parse_class_start(value)
+    except ValueError:
+        return None
+    base = datetime(2000, 1, 1, start.hour, start.minute) + timedelta(minutes=LATE_GRACE_MINUTES)
+    return base.time()

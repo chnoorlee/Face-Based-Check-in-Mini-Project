@@ -33,8 +33,10 @@ MENU = """  1. 人脸注册    （上传照片，录入特征库）
   2. 实时签到    （摄像头自动识别签到）
   3. 查看信息    （特征库与今日签到记录）
   4. 出勤报告    （统计缺勤名单，无需摄像头）
-  5. 删除学生    （从特征库移除）
-  6. 退出
+  5. 出勤统计    （汇总历史出勤率，导出 CSV）
+  6. 删除学生    （从特征库移除）
+  7. 环境自检    （检查依赖/模型/摄像头/字体）
+  0. 退出
 =========================================
 """
 
@@ -66,7 +68,18 @@ def cmd_register():
 def cmd_checkin():
     """功能 2：实时签到"""
     from checkin import run_console
-    run_console()
+    from utils.roster import Roster
+    from utils.storage import FeatureDatabase
+
+    session = input("节次名称（直接回车 = 不分节次）: ").strip() or None
+    raw = input("请假名单（逗号分隔，直接回车 = 无）: ").strip()
+    leave = [n.strip() for n in raw.replace("，", ",").split(",") if n.strip()]
+    roster = Roster.from_database(FeatureDatabase().load_all(), leave=leave) if leave else None
+    if leave and roster is not None:
+        ignored = [n for n in leave if n not in roster.leave]
+        if ignored:
+            print(f"⚠️ 以下请假人员不在特征库中，已忽略：{'、'.join(ignored)}")
+    run_console(session=session, roster=roster)
 
 
 def cmd_info():
@@ -109,8 +122,35 @@ def cmd_report():
     print(f"报告文件：{report}\n")
 
 
+def cmd_stats():
+    """功能 5：历史出勤统计"""
+    import stats
+    from config import ATTENDANCE_DIR
+    from config import late_after as config_late_after
+    rows, keys = stats.summarize(ATTENDANCE_DIR, late_after=config_late_after())
+    stats.print_table(rows, keys)
+    path = stats.write_stats_csv(rows, ATTENDANCE_DIR / "出勤统计.csv")
+    print(f"\n统计表已保存：{path}\n")
+
+
+def cmd_doctor():
+    """功能 7：环境自检"""
+    import doctor
+    # 复用 doctor 的检查函数，避免另起进程
+    doctor.check("Python 版本", doctor.check_python)
+    doctor.check("依赖库", doctor.check_deps)
+    doctor.check("模型文件", doctor.check_models)
+    doctor.check("配置文件", doctor.check_config)
+    doctor.check("数据目录", doctor.check_data_dirs)
+    doctor.check("中文显示", doctor.check_font)
+    doctor.check("特征库", doctor.check_database)
+    doctor.check("摄像头", doctor.check_camera)
+    fails = [r for r in doctor.results if r[0] == doctor.FAIL]
+    print(f"\n{'❌ 有 ' + str(len(fails)) + ' 项失败' if fails else '✅ 环境正常'}\n")
+
+
 def cmd_delete():
-    """功能 5：删除学生"""
+    """功能 6：删除学生"""
     from utils.storage import FeatureDatabase
     name = input("请输入要删除的学生姓名: ").strip()
     if not name:
@@ -126,21 +166,22 @@ def main():
         print("⚠️ 配置警告：", warning)
     print(BANNER)
     handlers = {"1": cmd_register, "2": cmd_checkin, "3": cmd_info,
-                "4": cmd_report, "5": cmd_delete}
+                "4": cmd_report, "5": cmd_stats, "6": cmd_delete,
+                "7": cmd_doctor}
     while True:
         print(MENU)
         try:
-            choice = input("请选择功能 [1-6]: ").strip()
+            choice = input("请选择功能 [0-7]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n再见！")
             break
         if choice in handlers:
             handlers[choice]()
-        elif choice == "6":
+        elif choice in ("0", "q", "Q"):
             print("再见！")
             break
         else:
-            print("输入无效，请输入 1-6\n")
+            print("输入无效，请输入 0-7\n")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # 项目元信息与工具配置（pip install -e . 可选；运行主程序不依赖本文件）
 [project]
 name = "face-checkin"
-version = "1.3.0"
+version = "1.4.0"
 description = "课堂自动人脸签到系统（课程 3320）：YOLO-Face 人脸检测 + SFace 特征比对"
 requires-python = ">=3.9"
 dependencies = [
@@ -19,7 +19,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 # 覆盖率统计范围：核心业务逻辑（检测/特征提取/画面绘制依赖真实模型与硬件，不纳入）
-source = ["utils", "register", "checkin", "config"]
+source = ["utils", "register", "checkin", "config", "stats"]
 omit = [
     "utils/face_detector.py",
     "utils/face_embedder.py",

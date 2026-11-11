@@ -95,15 +95,20 @@ class AttendanceRecorder:
 
     列为：学生姓名, 签到时间, 是否签到成功
     使用 utf-8-sig 编码，保证 Excel 直接打开中文不乱码。
+
+    节次（session）：同一天有多节课时传入节次名称，记录写入
+    attendance_YYYY-MM-DD_节次.csv，每日去重也随之按节次独立计算。
     """
 
     CSV_HEADER = ["学生姓名", "签到时间", "是否签到成功"]
 
-    def __init__(self, attendance_dir=None, date=None):
+    def __init__(self, attendance_dir=None, date=None, session=None):
         self.attendance_dir = Path(attendance_dir) if attendance_dir else ATTENDANCE_DIR
         ensure_dirs(self.attendance_dir)
         self.date = date or datetime.now().strftime("%Y-%m-%d")
-        self.path = self.attendance_dir / f"attendance_{self.date}.csv"
+        self.session = (session or "").strip() or None
+        self._suffix = f"_{sanitize_filename(self.session)}" if self.session else ""
+        self.path = self.attendance_dir / f"attendance_{self.date}{self._suffix}.csv"
 
     def load_checked_names(self) -> set:
         """读取今天已成功签到的学生名单（用于每日防重复签到）。
@@ -128,23 +133,33 @@ class AttendanceRecorder:
                 records.setdefault(row[0], row[1])
         return records
 
-    def write_summary(self, roster_names, checked_names) -> Path:
-        """写出勤报告 CSV：应到名单中每人一行，标记 已到 / 缺勤。
+    def write_summary(self, roster_names, checked_names, leave_names=(), late_after=None) -> Path:
+        """写出勤报告 CSV：应到名单中每人一行，状态为 已到 / 迟到 / 请假 / 缺勤。
 
-        文件名：attendance_YYYY-MM-DD_report.csv（与明细表同目录）
+        文件名：attendance_YYYY-MM-DD[_节次]_report.csv（与明细表同目录）
         列为：学生姓名, 状态, 签到时间
+        late_after：datetime.time 或 None。签到时间晚于该时刻记为「迟到」。
         """
         records = self.load_records()
-        path = self.attendance_dir / f"attendance_{self.date}_report.csv"
+        leave = set(leave_names or ())
+        path = self.attendance_dir / f"attendance_{self.date}{self._suffix}_report.csv"
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["学生姓名", "状态", "签到时间"])
             for name in roster_names:
-                if name in checked_names:
-                    writer.writerow([name, "已到", records.get(name, "")])
+                time_str = records.get(name, "")
+                if name in leave:
+                    writer.writerow([name, "请假", ""])
+                elif name in checked_names:
+                    status = "迟到" if is_late(time_str, late_after) else "已到"
+                    writer.writerow([name, status, time_str])
                 else:
                     writer.writerow([name, "缺勤", ""])
         return path
+
+    def report_path(self) -> Path:
+        """出勤报告文件路径（与明细表同目录、同日期/节次）"""
+        return self.attendance_dir / f"attendance_{self.date}{self._suffix}_report.csv"
 
     def record(self, name, success=True) -> dict:
         """追加一条签到记录，返回写入的行内容"""
@@ -162,3 +177,17 @@ class AttendanceRecorder:
                 writer.writerow(self.CSV_HEADER)
             writer.writerow(row)
         return dict(zip(self.CSV_HEADER, row))
+
+
+def is_late(time_str, late_after) -> bool:
+    """判断签到时间字符串（YYYY-MM-DD HH:MM:SS）是否晚于迟到判定时刻。
+
+    late_after 为 None 或时间字符串无法解析时返回 False（不判迟到）。
+    """
+    if late_after is None or not time_str:
+        return False
+    try:
+        stamp = datetime.strptime(time_str.strip(), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return False
+    return stamp.time() > late_after

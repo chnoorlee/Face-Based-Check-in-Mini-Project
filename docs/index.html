@@ -55,7 +55,7 @@
       <a class="btn btn-outline" href="https://github.com/chnoorlee/Face-Based-Check-in-Mini-Project" target="_blank" rel="noopener">查看源码 →</a>
     </div>
     <div class="stats reveal">
-      <div class="stat"><strong data-count="21">0</strong><span>单元测试全通过</span></div>
+      <div class="stat"><strong data-count="91">0</strong><span>单元测试全通过</span></div>
       <div class="stat"><strong><span data-count="9">0</span>.<span data-count="6">0</span> fps</strong><span>CPU 实时识别速度</span></div>
       <div class="stat"><strong data-count="3">0</strong><span>轻量模型 · 共 43MB</span></div>
       <div class="stat"><strong data-count="0">0</strong><span>零编译依赖</span></div>
@@ -103,6 +103,20 @@
         </div>
         <h3>CSV 签到记录</h3>
         <p>每天一个 CSV 文件，三列：学生姓名 / 签到时间 / 是否签到成功。utf-8-sig 编码，Excel 双击打开中文不乱码。</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon" style="--ic:#f6c453">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+        </div>
+        <h3>四态考勤 · 迟到与请假</h3>
+        <p>不只是「来了/没来」：超过上课时间 + 宽限自动记<b>迟到</b>，<code>--leave 王五</code> 登记<b>请假</b>，报告逐人标记 已到 / 迟到 / 请假 / 缺勤。支持同一天多节课（<code>-S 第1节</code>），去重互不影响。</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon" style="--ic:#3dd7f2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l3-4 3 2.5 4-6"/></svg>
+        </div>
+        <h3>出勤统计 · 环境自检</h3>
+        <p><code>stats.py</code> 跨课次汇总每人的出勤率与迟到次数并导出 CSV；<code>doctor.py</code> 一键自检依赖、模型、摄像头、字体与目录权限，换机器也能快速定位问题。</p>
       </div>
       <div class="card reveal">
         <div class="icon" style="--ic:#f46d6d">
@@ -203,15 +217,21 @@
         <span class="cmt"># 摄像头实时签到（应到 = 全部已注册学生）</span>
       </div>
       <div class="term-line">
-        <span class="prompt">$</span> <span class="cmd">python checkin.py --roster 名单.txt</span>
-        <button class="copy-btn" data-copy="python checkin.py --roster 名单.txt" title="复制">复制</button>
-        <span class="cmt"># 或指定本次课堂应到名单，按 q 退出</span>
+        <span class="prompt">$</span> <span class="cmd">python checkin.py --roster 名单.txt -S 第1节 --leave 王五</span>
+        <button class="copy-btn" data-copy="python checkin.py --roster 名单.txt -S 第1节 --leave 王五" title="复制">复制</button>
+        <span class="cmt"># 名单 + 节次 + 请假，按 q 退出</span>
       </div>
       <div class="term-out">
         <span class="ok">✅ [签到成功] 张三（2026-11-11 10:23:45）</span>
         <span class="dim">⚠️ 检测到未知人员（不在特征库中）</span>
-        <span class="ok">出勤：应到 30 人 | 实到 26 人 | 缺勤 4 人</span>
-        <span class="bad">❌ 未到（4）：赵六、钱七、孙八、周九</span>
+        <span class="ok">出勤：应到 30 人 | 实到 26 人 | 请假 2 人 | 缺勤 2 人</span>
+        <span class="warn">⏰ 迟到（3）：孙八、周九、吴十</span>
+        <span class="bad">❌ 未到（2）：赵六、钱七</span>
+      </div>
+      <div class="term-line">
+        <span class="prompt">$</span> <span class="cmd">python stats.py --roster 名单.txt</span>
+        <button class="copy-btn" data-copy="python stats.py --roster 名单.txt" title="复制">复制</button>
+        <span class="cmt"># 汇总本学期出勤率 → 出勤统计.csv</span>
       </div>
     </div>
     <p class="hint reveal">无摄像头也能演示：<code>python scripts/make_demo_video.py 照片.jpg demo.mp4</code> 然后 <code>python checkin.py --source demo.mp4 --no-window</code>。图形界面运行 <code>python gui.py</code>，控制台菜单运行 <code>python main.py</code>。</p>
@@ -278,6 +298,14 @@
       <details>
         <summary>同一学生一天能签到几次？</summary>
         <p>同一天只签到一次：签到后进入 60 秒冷却期（画面标记「冷却中 · 剩余秒数」），冷却结束后当天内不再重复签到；程序重启后读取当天 CSV 继续生效。冷却时长可在 <code>config.py</code> 的 <code>COOLDOWN_SECONDS</code> 调整。</p>
+      </details>
+      <details>
+        <summary>一天有两节课，同一个学生能签两次吗？</summary>
+        <p>可以。用 <code>--session 第1节</code> / <code>--session 第2节</code> 区分节次，签到记录分文件存放，每日去重也按节次独立计算。不指定节次时退化为「一天一签」。出勤统计会把每个节次算作一次课。</p>
+      </details>
+      <details>
+        <summary>迟到和请假怎么记录？</summary>
+        <p>迟到：签到时间晚于「上课时间 + 迟到宽限」（默认 08:00 + 10 分钟）自动判定，可用 <code>--start 13:30</code> 临时指定上课时间，或在 <code>config.py</code> 修改 <code>CLASS_START_TIME</code> / <code>LATE_GRACE_MINUTES</code>。请假：<code>--leave 王五</code>（可重复使用），或在名单 CSV 里给该学生标注「请假」。</p>
       </details>
       <details>
         <summary>缺勤名单是怎么算出来的？</summary>
