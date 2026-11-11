@@ -20,7 +20,7 @@ class TestFeatureDatabase:
         db.save("张三", np.ones(128), _make_image())
         loaded = db.load_all()
         assert set(loaded) == {"张三"}
-        np.testing.assert_array_equal(loaded["张三"], np.ones(128))
+        np.testing.assert_array_equal(loaded["张三"].ravel(), np.ones(128))
         # 人脸照片也应保存成功
         assert (db.faces_dir / "张三.jpg").exists()
 
@@ -55,7 +55,7 @@ class TestFeatureDatabase:
         assert ok1 is True
         assert ok2 is False and "冲突" in msg
         assert db.names() == ["张 三"]          # 第一个学生未被覆盖
-        np.testing.assert_array_equal(db.load_all()["张 三"], np.ones(128))
+        np.testing.assert_array_equal(db.load_all()["张 三"].ravel(), np.ones(128))
 
     def test_corrupt_npy_is_skipped_not_fatal(self, tmp_path):
         db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
@@ -70,12 +70,44 @@ class TestFeatureDatabase:
         np.save(tmp_path / "emb" / "二维.npy", np.ones((4, 4)))
         assert set(db.load_all()) == {"张三"}
 
-    def test_overwrite_same_name(self, tmp_path):
+    def test_same_name_appends_photos(self, tmp_path):
+        # 同名再次注册 = 追加一张照片（多状态覆盖，识别取最近）
         db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
         db.save("张三", np.ones(128), _make_image())
         db.save("张三", np.zeros(128), _make_image())
-        assert len(db.names()) == 1
-        np.testing.assert_array_equal(db.load_all()["张三"], np.zeros(128))
+        assert db.names() == ["张三"]
+        assert db.load_all()["张三"].shape == (2, 128)
+        assert (db.faces_dir / "张三.jpg").exists()
+        assert (db.faces_dir / "张三_2.jpg").exists()
+
+    def test_replace_mode_discards_old_photos(self, tmp_path):
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张三", np.ones(128), _make_image())
+        db.save("张三", np.zeros(128), _make_image(), append=False)
+        assert db.load_all()["张三"].shape == (1, 128)
+        np.testing.assert_array_equal(db.load_all()["张三"].ravel(), np.zeros(128))
+
+    def test_photo_count_is_capped(self, tmp_path):
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        for i in range(FeatureDatabase.MAX_PHOTOS + 3):
+            db.save("张三", np.full(128, i, dtype=float), _make_image())
+        assert db.load_all()["张三"].shape[0] == FeatureDatabase.MAX_PHOTOS
+
+    def test_match_uses_closest_of_multiple_photos(self, tmp_path):
+        # 学生登记了两张差异很大的照片（模拟戴/不戴眼镜），签到向量只要接近其中一张即可匹配
+        from utils.storage import find_best_match
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张三", np.zeros(128), _make_image())        # 状态 A
+        db.save("张三", np.full(128, 10.0), _make_image())   # 状态 B（与 A 相差很远）
+        database = db.load_all()
+
+        probe = np.full(128, 10.0) + 0.01                    # 接近状态 B
+        # 只登记状态 A 时：距离 = sqrt(128)*10 ≈ 113，必然认不出
+        name_only_a, _ = find_best_match(probe, {"张三": np.zeros(128)}, tolerance=0.6)
+        assert name_only_a is None
+        # 两张都登记后：取最近的一张，距离 ≈ 0.11，识别成功
+        name, dist = find_best_match(probe, database, tolerance=0.6)
+        assert name == "张三" and dist < 0.6
 
     def test_delete_removes_all_files(self, tmp_path):
         db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")

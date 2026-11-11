@@ -89,17 +89,28 @@ def test_register_embedding_failure(tmp_db_dirs, monkeypatch):
     assert not ok and "特征提取失败" in msg
 
 
-def test_register_overwrite_reports(tmp_db_dirs, monkeypatch):
+def test_register_same_name_appends_photo(tmp_db_dirs, monkeypatch):
     monkeypatch.setattr(register, "FaceDetector", lambda: FakeDetector([(10, 10, 60, 60)]))
     monkeypatch.setattr(register, "FaceEmbedder", lambda: FakeEmbedder())
     img = make_image(tmp_db_dirs)
 
-    ok1, msg1 = register.register_face(img, "张三")
+    ok1, _ = register.register_face(img, "张三")
     ok2, msg2 = register.register_face(img, "张三")
 
     assert ok1 and ok2
-    assert "覆盖" in msg2
+    assert "2 张照片" in msg2
     assert len(list((tmp_db_dirs / "emb").glob("*.npy"))) == 1
+
+
+def test_register_replace_reports_overwrite(tmp_db_dirs, monkeypatch):
+    monkeypatch.setattr(register, "FaceDetector", lambda: FakeDetector([(10, 10, 60, 60)]))
+    monkeypatch.setattr(register, "FaceEmbedder", lambda: FakeEmbedder())
+    img = make_image(tmp_db_dirs)
+
+    register.register_face(img, "张三")
+    ok, msg = register.register_face(img, "张三", append=False)
+
+    assert ok and "覆盖" in msg
 
 
 def test_register_model_download_failure(tmp_db_dirs, monkeypatch):

@@ -73,8 +73,8 @@
         <div class="icon" style="--ic:#7c6cff">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5a2 2 0 0 1 2-2h2"/><path d="M16 3h2a2 2 0 0 1 2 2v2"/><path d="M20 17v2a2 2 0 0 1-2 2h-2"/><path d="M8 21H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.5"/></svg>
         </div>
-        <h3>人脸注册</h3>
-        <p>上传一张静态照片 + 输入姓名，YOLO-Face 自动检测人脸、提取 128 维特征存入本地特征库。支持中文路径、同名覆盖提醒。</p>
+        <h3>人脸注册 · 多照片</h3>
+        <p>上传静态照片 + 输入姓名即可注册。同一人可登记 2~5 张照片（戴/不戴眼镜、不同光线），识别时取最接近的一张——这是提升真实场景识别率最有效的办法。支持中文路径与原名显示。</p>
       </div>
       <div class="card reveal">
         <div class="icon" style="--ic:#3dd7f2">
@@ -284,8 +284,8 @@
         <p>dlib 在 Windows 上没有官方预编译包，需要安装 CMake + Visual Studio 编译工具链才能从源码编译，对课程作业不够「开箱即用」。本项目改用 OpenCV 自带的 DNN 模块运行 SFace 模型，纯 pip 安装即可使用。</p>
       </details>
       <details>
-        <summary>识别不准确怎么办？</summary>
-        <p>注册时使用光线充足、正面无遮挡的清晰照片；正对摄像头、避免侧脸和逆光。阈值可调：<code>config.py</code> 的 <code>MATCH_TOLERANCE</code>，认不出自己调大到 1.2，误识别调小到 0.8，或运行时用 <code>--tolerance</code> 参数临时覆盖。</p>
+        <summary>识别不准确 / 换了样子认不出怎么办？</summary>
+        <p><b>先多登记几张照片</b>——这是最有效的一招。实测同一人「戴眼镜」与「不戴眼镜」两张照片的特征距离可达 1.33，和「不同的人」几乎一样远，单一登记必然认不出；把两张都登记后，签到取最接近的一张即可解决：<br><code>python register.py -i 戴眼镜.jpg -i 不戴眼镜.jpg -n 张三</code><br>其次：注册照片要光线充足、正面无遮挡；正对摄像头、避免侧脸与逆光；必要时调整 <code>MATCH_TOLERANCE</code> 或运行时用 <code>--tolerance</code>。</p>
       </details>
       <details>
         <summary>没有摄像头怎么演示？</summary>

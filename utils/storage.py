@@ -25,19 +25,22 @@ logger = logging.getLogger(__name__)
 def find_best_match(embedding, database, tolerance):
     """在特征库中寻找与 embedding 最相似的学生。
 
-    database: {姓名: 特征向量}
+    database: {姓名: 特征向量} 或 {姓名: N×D 特征矩阵}（一个学生可登记多张照片）。
+    匹配距离取该学生所有登记照片中的**最小值**——只要有一张像，就算本人。
     返回 (姓名, 距离)；距离超过 tolerance 视为未匹配，返回 (None, 距离)。
     特征库为空、或特征维度不一致时返回 (None, None)。
     """
     if not database:
         return None, None
-    probe = np.asarray(embedding).ravel()
+    probe = np.asarray(embedding, dtype=np.float64).ravel()
     best_name, best_dist = None, float("inf")
-    for name, vec in database.items():
-        vec = np.asarray(vec).ravel()
-        if vec.shape != probe.shape:      # 维度异常的历史特征，跳过而不是崩溃
-            continue
-        dist = float(np.linalg.norm(probe - vec))
+    for name, vecs in database.items():
+        arr = np.asarray(vecs, dtype=np.float64)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.ndim != 2 or arr.shape[1] != probe.shape[0]:
+            continue                      # 维度异常的历史特征，跳过而不是崩溃
+        dist = float(np.min(np.linalg.norm(arr - probe, axis=1)))
         if dist < best_dist:
             best_name, best_dist = name, dist
     if best_name is None:
@@ -94,8 +97,14 @@ class FeatureDatabase:
         return None
 
     # ---------- 读写 ----------
-    def save(self, name, embedding, face_image):
-        """保存特征向量与人脸照片。返回 (是否成功, 提示信息)。"""
+    MAX_PHOTOS = 5   # 每个学生最多保留的照片数（多张覆盖戴眼镜/不戴等不同状态）
+
+    def save(self, name, embedding, face_image, append=True):
+        """保存一张人脸特征与人脸照片。返回 (是否成功, 提示信息)。
+
+        append=True（默认）：在已有登记基础上追加一张照片，识别时取最近距离；
+        append=False：清空旧登记，只保留这一张。
+        """
         fname = sanitize_filename(name)
         index = self._load_index()
 
@@ -105,9 +114,23 @@ class FeatureDatabase:
                            f"{fname}.npy，为避免覆盖请不要使用仅特殊字符不同的姓名")
 
         vec_path = self.embeddings_dir / f"{fname}.npy"
+        old = None
+        if append and vec_path.exists():
+            try:
+                old = np.asarray(np.load(vec_path), dtype=np.float32)
+                if old.ndim == 1:
+                    old = old.reshape(1, -1)
+            except (OSError, ValueError):
+                old = None      # 旧文件损坏：直接重建
+
+        new_vec = np.asarray(embedding, dtype=np.float32).ravel().reshape(1, -1)
+        stack = new_vec if old is None else np.vstack([old, new_vec])
+        if stack.shape[0] > self.MAX_PHOTOS:
+            stack = stack[-self.MAX_PHOTOS:]   # 超出上限时丢弃最旧的登记
+
         tmp_path = self.embeddings_dir / f".{fname}.tmp.npy"
         try:
-            np.save(tmp_path, np.asarray(embedding))     # 先写临时文件，再原子替换
+            np.save(tmp_path, stack)          # 先写临时文件，再原子替换
             os.replace(tmp_path, vec_path)
         except OSError as exc:
             if tmp_path.exists():
@@ -117,21 +140,29 @@ class FeatureDatabase:
                     pass
             return False, f"保存人脸特征失败：{exc}"
 
-        photo_ok = imwrite_unicode(self.faces_dir / f"{fname}.jpg", face_image)
+        # 照片按序号保存：姓名.jpg、姓名_2.jpg、姓名_3.jpg……
+        photo_no = 1 if old is None else min(old.shape[0] + 1, self.MAX_PHOTOS)
+        photo_name = f"{fname}.jpg" if photo_no == 1 else f"{fname}_{photo_no}.jpg"
+        photo_ok = imwrite_unicode(self.faces_dir / photo_name, face_image)
         if not photo_ok:
             logger.warning("人脸照片保存失败（特征已入库）：%s", name)
 
         index[name] = {"stem": fname,
-                       "registered_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                       "registered_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                       "photos": int(stack.shape[0])}
         try:
             self._write_index(index)
         except OSError as exc:
             logger.warning("更新特征库索引失败：%s", exc)
 
-        return True, "" if photo_ok else "（人脸照片保存失败，特征已入库）"
+        if not photo_ok:
+            return True, f"（已登记 {stack.shape[0]} 张照片；但照片文件保存失败）"
+        if stack.shape[0] > 1:
+            return True, f"（已登记 {stack.shape[0]} 张照片，识别时取最接近的一张）"
+        return True, ""
 
     def load_all(self) -> dict:
-        """加载全部已注册学生：{显示姓名: 特征向量}。
+        """加载全部已注册学生：{显示姓名: 特征向量} 或 {姓名: N×D 矩阵}。
 
         单个特征文件损坏时跳过并记录警告，不影响其他学生使用。
         """
@@ -141,11 +172,14 @@ class FeatureDatabase:
         for p in sorted(self.embeddings_dir.glob("*.npy")):
             name = stem_to_name.get(p.stem, p.stem)
             try:
-                vec = np.asarray(np.load(p))
+                vec = np.asarray(np.load(p), dtype=np.float32)
             except (OSError, ValueError) as exc:
                 logger.warning("跳过无法读取的特征文件 %s：%s", p.name, exc)
                 continue
-            if vec.ndim != 1 or vec.size == 0:
+            if vec.ndim == 1 and vec.size:
+                vec = vec.reshape(1, -1)          # 兼容旧版单张登记
+            # 人脸特征向量至少几十维；维度明显异常的文件（如误存的矩阵）直接跳过
+            if vec.ndim != 2 or vec.size == 0 or vec.shape[1] < 32:
                 logger.warning("跳过维度异常的特征文件 %s（shape=%s）", p.name, vec.shape)
                 continue
             database[name] = vec
@@ -198,7 +232,12 @@ class FeatureDatabase:
                 meta = (p.stem, {})
             registered = meta[1].get("registered_at") or \
                 datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-            infos.append({"name": meta[0], "registered_at": registered})
+            try:
+                arr = np.asarray(np.load(p), dtype=np.float32)
+                photos = 1 if arr.ndim == 1 else int(arr.shape[0])
+            except (OSError, ValueError):
+                photos = 0
+            infos.append({"name": meta[0], "registered_at": registered, "photos": photos})
         return infos
 
 

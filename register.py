@@ -35,10 +35,13 @@ from utils.storage import FeatureDatabase  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
-def register_face(image_path: str, name: str):
+def register_face(image_path: str, name: str, append=True):
     """人脸注册核心流程。返回 (是否成功, 提示信息)。
 
     注册阶段输入是静态图片；签到阶段才是摄像头实时画面。
+
+    append=True：为已有学生追加一张照片（多张照片能覆盖戴眼镜/不戴等不同状态，
+    识别时取最接近的一张，显著提升真实场景的识别率）；append=False 则覆盖重建。
     """
     name = (name or "").strip()
     if not name:
@@ -80,16 +83,16 @@ def register_face(image_path: str, name: str):
         return False, "人脸区域为空，请换一张照片重试"
 
     db = FeatureDatabase()
-    overwritten = db.exists(name)
+    existed = db.exists(name)
     try:
-        ok, save_msg = db.save(name, embedding, face_crop)
+        ok, save_msg = db.save(name, embedding, face_crop, append=append)
     except OSError as exc:      # 磁盘/权限问题
         return False, f"保存人脸特征失败：{exc}"
     if not ok:
         return False, save_msg
 
     detail = f"注册成功！姓名：{name} | 检测后端：{detector.backend}{save_msg}"
-    if overwritten:
+    if existed and not append:
         detail += "（已覆盖同名旧记录）"
     # 姓名含特殊字符时，文件会被改名保存；提示实际文件名，便于排查
     if sanitize_filename(name) != name:
@@ -104,8 +107,11 @@ def main():  # pragma: no cover - 命令行入口（手工实测覆盖）
     for warning in validate_config():
         print("⚠️ 配置警告：", warning)
     parser = argparse.ArgumentParser(description="课堂人脸签到系统 - 人脸注册模块")
-    parser.add_argument("--image", "-i", help="人脸照片路径（支持中文路径）")
+    parser.add_argument("--image", "-i", action="append", metavar="照片",
+                        help="人脸照片路径（支持中文路径，可重复：-i 1.jpg -i 2.jpg 登记多张）")
     parser.add_argument("--name", "-n", help="学生姓名")
+    parser.add_argument("--replace", action="store_true",
+                        help="覆盖重建该学生的登记（默认是追加一张照片）")
     parser.add_argument("--list", "-l", action="store_true", help="列出已注册学生与注册时间")
     parser.add_argument("--delete", "-d", metavar="姓名", help="删除已注册学生")
     args = parser.parse_args()
@@ -118,7 +124,7 @@ def main():  # pragma: no cover - 命令行入口（手工实测覆盖）
             return 0
         print(f"已注册学生（{len(infos)} 人）：")
         for info in infos:
-            print(f"  - {info['name']}（注册于 {info['registered_at']}）")
+            print(f"  - {info['name']}（{info.get('photos', 1)} 张照片，注册于 {info['registered_at']}）")
         return 0
 
     if args.delete:
@@ -130,12 +136,22 @@ def main():  # pragma: no cover - 命令行入口（手工实测覆盖）
         return 1
 
     # 未通过命令行传参时，交互式询问
-    image_path = args.image or input("请输入人脸照片路径（可把文件拖进窗口）: ").strip().strip('"')
+    images = args.image or [input("请输入人脸照片路径（可把文件拖进窗口）: ").strip().strip('"')]
     name = args.name or input("请输入学生姓名: ").strip()
 
-    ok, msg = register_face(image_path, name)
-    print(("✅ " if ok else "❌ ") + msg)
-    return 0 if ok else 1
+    append = not args.replace
+    succeeded = 0
+    for i, path in enumerate(images):
+        ok, msg = register_face(path, name, append=append)
+        prefix = f"[{i + 1}/{len(images)}] " if len(images) > 1 else ""
+        print(prefix + ("✅ " if ok else "❌ ") + msg)
+        if ok:
+            succeeded += 1
+            append = True      # 第一张之后一律追加，保留已登记的照片
+    if len(images) > 1:
+        print(f"共登记 {succeeded}/{len(images)} 张照片"
+              + ("，识别时会取最接近的一张" if succeeded > 1 else ""))
+    return 0 if succeeded else 1
 
 
 if __name__ == "__main__":
