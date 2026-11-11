@@ -1,5 +1,7 @@
 # 课堂自动人脸签到系统（课程 3320）
 
+> 🌐 项目宣传页（GitHub Pages）：https://chnoorlee.github.io/Face-Based-Check-in-Mini-Project/
+
 基于 **Python + YOLO-Face + 人脸特征比对** 的课堂自动签到课程项目。
 
 - **人脸注册模块**：上传静态照片 → YOLO-Face 检测人脸 → 提取 128 维人脸特征 → 保存到本地特征库
@@ -20,14 +22,17 @@ face/
 ├── main.py                    # 控制台主菜单入口
 ├── gui.py                     # 可选 tkinter 图形界面
 ├── requirements.txt           # 依赖清单
+├── pyproject.toml             # 项目元信息与 pytest 配置
 ├── utils/
 │   ├── face_detector.py       # YOLO-Face 人脸检测（模型缺失时自动回退 Haar）
-│   ├── face_embedder.py       # 人脸特征提取（face_recognition / dlib）
+│   ├── face_embedder.py       # 人脸特征提取（SFace + YuNet 对齐，OpenCV DNN）
 │   ├── storage.py             # 特征库读写 + 签到 CSV 读写 + 特征比对
 │   ├── drawing.py             # 画面标注（识别框 + 中文姓名标签）
-│   └── imutils.py             # 中文路径图片读写等小工具
+│   └── imutils.py             # 中文路径图片读写、模型下载等小工具
 ├── scripts/
-│   └── make_demo_video.py     # 演示视频生成（无摄像头环境演示用）
+│   ├── make_demo_video.py     # 演示视频生成（无摄像头环境演示用）
+│   └── make_og_image.py       # 宣传页社交分享图生成
+├── docs/                      # GitHub Pages 宣传页（纯静态，零外部依赖）
 ├── tests/                     # 单元测试（存储 / 比对 / 防重复签到逻辑）
 ├── data/                      # 本地数据（运行后生成，不入库）
 │   ├── faces/                 #   注册的人脸照片

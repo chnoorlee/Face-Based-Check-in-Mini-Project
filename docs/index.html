@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>课堂自动人脸签到系统 · YOLO-Face + SFace</title>
+<meta name="description" content="基于 Python + YOLO-Face + SFace 的课堂自动人脸签到系统：照片注册、摄像头实时识别签到、防重复签到、CSV 记录。大学 Python 课程作业（课程 3320）。">
+<meta property="og:title" content="课堂自动人脸签到系统 · YOLO-Face + SFace">
+<meta property="og:description" content="照片注册 → 摄像头实时识别 → 自动签到。防重复、CSV 记录、纯 pip 安装零编译。">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://chnoorlee.github.io/Face-Based-Check-in-Mini-Project/assets/og.png">
+<meta name="theme-color" content="#0a0e1a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='4' width='28' height='24' rx='6' fill='none' stroke='%237c6cff' stroke-width='2.5'/%3E%3Ccircle cx='11' cy='13' r='2.2' fill='%233dd7f2'/%3E%3Ccircle cx='21' cy='13' r='2.2' fill='%233dd7f2'/%3E%3Cpath d='M8 21c1.5 2 3.5 3 5.5 3' stroke='%233dd68c' stroke-width='2.2' stroke-linecap='round' fill='none'/%3E%3Ccircle cx='24' cy='23' r='5' fill='%233dd68c'/%3E%3Cpath d='M22 23l1.5 1.5L26.5 21' stroke='%230a0e1a' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="container nav-inner">
+    <a class="brand" href="#top">
+      <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="2" y="4" width="28" height="24" rx="6" fill="none" stroke="#7c6cff" stroke-width="2.5"/>
+        <circle cx="11" cy="13" r="2.2" fill="#3dd7f2"/><circle cx="21" cy="13" r="2.2" fill="#3dd7f2"/>
+        <path d="M8 21c1.5 2 3.5 3 5.5 3" stroke="#3dd68c" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+        <circle cx="24" cy="23" r="5" fill="#3dd68c"/>
+        <path d="M22 23l1.5 1.5L26.5 21" stroke="#0a0e1a" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>人脸签到系统</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features">功能</a>
+      <a href="#workflow">工作流程</a>
+      <a href="#quickstart">快速开始</a>
+      <a href="#benchmark">实测数据</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn btn-ghost" href="https://github.com/chnoorlee/Face-Based-Check-in-Mini-Project" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ============ Hero ============ -->
+<section class="hero">
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="container hero-inner">
+    <div class="badge reveal">课程 3320 · Python 课程作业 · 开源 MIT</div>
+    <h1 class="reveal">课堂<span class="grad">自动人脸签到</span>系统</h1>
+    <p class="sub reveal">上传一张照片完成注册，摄像头扫一眼自动签到。<br>YOLO-Face 检测 + SFace 特征比对，冷却防重复，CSV 一键导出，纯 pip 安装零编译。</p>
+    <div class="cta reveal">
+      <a class="btn btn-primary" href="#quickstart">立即开始</a>
+      <a class="btn btn-outline" href="https://github.com/chnoorlee/Face-Based-Check-in-Mini-Project" target="_blank" rel="noopener">查看源码 →</a>
+    </div>
+    <div class="stats reveal">
+      <div class="stat"><strong data-count="21">0</strong><span>单元测试全通过</span></div>
+      <div class="stat"><strong><span data-count="9">0</span>.<span data-count="6">0</span> fps</strong><span>CPU 实时识别速度</span></div>
+      <div class="stat"><strong data-count="3">0</strong><span>轻量模型 · 共 43MB</span></div>
+      <div class="stat"><strong data-count="0">0</strong><span>零编译依赖</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 功能特性 ============ -->
+<section id="features" class="section">
+  <div class="container">
+    <h2 class="reveal">核心功能</h2>
+    <p class="lead reveal">注册与签到分离，控制台为主、图形界面可选，开箱即用。</p>
+    <div class="bento">
+      <div class="card reveal">
+        <div class="icon" style="--ic:#7c6cff">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5a2 2 0 0 1 2-2h2"/><path d="M16 3h2a2 2 0 0 1 2 2v2"/><path d="M20 17v2a2 2 0 0 1-2 2h-2"/><path d="M8 21H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.5"/></svg>
+        </div>
+        <h3>人脸注册</h3>
+        <p>上传一张静态照片 + 输入姓名，YOLO-Face 自动检测人脸、提取 128 维特征存入本地特征库。支持中文路径、同名覆盖提醒。</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon" style="--ic:#3dd7f2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2.5"/><path d="M16 10.5 22 7v10l-6-3.5"/></svg>
+        </div>
+        <h3>摄像头实时签到</h3>
+        <p>调用本地摄像头实时画面，逐帧检测人脸并与特征库比对。识别成功自动签到并写入 CSV，画面实时标注姓名与置信距离。</p>
+      </div>
+      <div class="card wide reveal">
+        <div class="icon" style="--ic:#3dd68c">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M7 3c0 5 1.5 8 5 8s5 3 5 8"/><path d="M5 3c0 5 1.5 8 5 8s5 3 5 8" stroke-dasharray="2.5 2.5"/><circle cx="19" cy="20" r="1" fill="currentColor"/></svg>
+        </div>
+        <h3>防重复签到</h3>
+        <p><strong>冷却期</strong>：签到成功后 60 秒内同一学生不再重复签到，画面标记「冷却中 · 剩余秒数」；<strong>每日去重</strong>：同一天只签到一次，程序重启后读取当天 CSV 继续生效，双重保险。</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon" style="--ic:#f6c453">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+        </div>
+        <h3>CSV 签到记录</h3>
+        <p>每天一个 CSV 文件，三列：学生姓名 / 签到时间 / 是否签到成功。utf-8-sig 编码，Excel 双击打开中文不乱码。</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon" style="--ic:#f46d6d">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        </div>
+        <h3>未知人员标记</h3>
+        <p>未匹配特征库的人脸画红色框标记「未知人员」，控制台限流提示，但不写入签到表——避免无效记录刷屏。</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon" style="--ic:#b18cff">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M6 7h.01M9 7h6"/></svg>
+        </div>
+        <h3>控制台 + 可选 GUI</h3>
+        <p>简易控制台菜单开箱即用；另附 tkinter 图形界面：注册对话框 + 摄像头画面内嵌窗口，逻辑与控制台完全共用同一引擎。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 工作流程 ============ -->
+<section id="workflow" class="section alt">
+  <div class="container">
+    <h2 class="reveal">工作流程</h2>
+    <p class="lead reveal">注册阶段处理静态图片，签到阶段处理摄像头实时画面，两阶段共用特征库。</p>
+    <div class="pipeline">
+      <div class="pipe-col reveal">
+        <div class="pipe-head"><span class="dot dot-reg"></span>注册阶段 · 静态图片</div>
+        <ol class="steps">
+          <li><b>上传照片</b><small>支持中文路径（jpeg / png / bmp）</small></li>
+          <li><b>YOLO-Face 检测</b><small>yolov8n-face.pt · 约 6MB · 多张人脸自动选最大</small></li>
+          <li><b>YuNet 关键点对齐</b><small>5 点仿射变换，抗角度差异</small></li>
+          <li><b>SFace 提取 128 维特征</b><small>OpenCV DNN 推理 · 约 37MB</small></li>
+          <li><b>存入特征库</b><small>data/embeddings/姓名.npy</small></li>
+        </ol>
+      </div>
+      <div class="pipe-link reveal" aria-hidden="true">
+        <span>特征库</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </div>
+      <div class="pipe-col reveal">
+        <div class="pipe-head"><span class="dot dot-live"></span>签到阶段 · 摄像头实时</div>
+        <ol class="steps">
+          <li><b>摄像头取帧</b><small>自动曝光预热 5 帧，画面更稳</small></li>
+          <li><b>YOLO-Face 检测</b><small>逐帧检测画面中的所有人脸</small></li>
+          <li><b>提取特征并比对</b><small>欧氏距离 ≤ 阈值 → 识别成功</small></li>
+          <li><b>自动签到</b><small>冷却 60s + 每日去重防重复</small></li>
+          <li><b>写入 CSV</b><small>姓名 / 时间 / 是否成功</small></li>
+        </ol>
+      </div>
+    </div>
+    <div class="threshold-note reveal">
+      距离越近越是同一个人：<code>≤ 1.0</code> 判定为本人签到，<code>&gt; 1.0</code> 标记未知人员；阈值可在 <code>config.py</code> 或 <code>--tolerance</code> 参数中调整。
+    </div>
+  </div>
+</section>
+
+<!-- ============ 技术栈 ============ -->
+<section class="section">
+  <div class="container">
+    <h2 class="reveal">技术栈</h2>
+    <p class="lead reveal">全部依赖 pip 一条命令安装，不需要编译器，不需要 GPU。</p>
+    <div class="stack reveal">
+      <div class="stack-item"><span class="stack-name">YOLOv8-Face</span><span class="stack-desc">人脸检测 · 6MB</span></div>
+      <div class="stack-item"><span class="stack-name">SFace</span><span class="stack-desc">128 维特征提取 · 37MB</span></div>
+      <div class="stack-item"><span class="stack-name">YuNet</span><span class="stack-desc">关键点对齐 · 230KB</span></div>
+      <div class="stack-item"><span class="stack-name">OpenCV DNN</span><span class="stack-desc">模型推理 + 视频采集</span></div>
+      <div class="stack-item"><span class="stack-name">ultralytics</span><span class="stack-desc">YOLO 推理框架</span></div>
+      <div class="stack-item"><span class="stack-name">Python 3.9+</span><span class="stack-desc">纯标准库存储（npy + csv）</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 快速开始 ============ -->
+<section id="quickstart" class="section alt">
+  <div class="container">
+    <h2 class="reveal">快速开始</h2>
+    <p class="lead reveal">三步跑起来。首次运行会自动下载 3 个模型文件（共约 43MB，含备用地址）。</p>
+    <div class="term reveal">
+      <div class="term-bar"><span></span><span></span><span></span><span class="term-title">Windows · Python 3.10+</span></div>
+      <div class="term-line">
+        <span class="prompt">$</span> <span class="cmd">pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu</span>
+        <button class="copy-btn" data-copy="pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu" title="复制">复制</button>
+        <span class="cmt"># CPU 版 PyTorch（可选，走镜像则省略）</span>
+      </div>
+      <div class="term-line">
+        <span class="prompt">$</span> <span class="cmd">pip install -r requirements.txt</span>
+        <button class="copy-btn" data-copy="pip install -r requirements.txt" title="复制">复制</button>
+        <span class="cmt"># 国内加速：加 -i https://pypi.tuna.tsinghua.edu.cn/simple</span>
+      </div>
+      <div class="term-line">
+        <span class="prompt">$</span> <span class="cmd">python register.py -i 照片.jpg -n 张三</span>
+        <button class="copy-btn" data-copy="python register.py -i 照片.jpg -n 张三" title="复制">复制</button>
+        <span class="cmt"># 人脸注册：上传照片录入特征库</span>
+      </div>
+      <div class="term-line">
+        <span class="prompt">$</span> <span class="cmd">python checkin.py</span>
+        <button class="copy-btn" data-copy="python checkin.py" title="复制">复制</button>
+        <span class="cmt"># 摄像头实时签到，按 q 退出</span>
+      </div>
+      <div class="term-out">
+        <span class="ok">✅ [签到成功] 张三（2026-11-11 10:23:45）</span>
+        <span class="dim">⚠️ 检测到未知人员（不在特征库中）</span>
+      </div>
+    </div>
+    <p class="hint reveal">无摄像头也能演示：<code>python scripts/make_demo_video.py 照片.jpg demo.mp4</code> 然后 <code>python checkin.py --source demo.mp4 --no-window</code>。图形界面运行 <code>python gui.py</code>，控制台菜单运行 <code>python main.py</code>。</p>
+  </div>
+</section>
+
+<!-- ============ 实测数据 ============ -->
+<section id="benchmark" class="section">
+  <div class="container">
+    <h2 class="reveal">实测数据</h2>
+    <p class="lead reveal">真实人脸照片 + 视频流在本机端到端实测（CPU 推理），不是纸上谈兵。</p>
+    <div class="bench-grid">
+      <div class="card reveal">
+        <h3>特征距离 vs 判定阈值</h3>
+        <p class="dim">128 维特征欧氏距离（0 ~ 2），阈值 1.0</p>
+        <div class="chart">
+          <div class="chart-bar" style="--w:41%; --c:#3dd68c" title="同人不同照片：0.82">
+            <span class="bar-label">同人 · 0.82</span>
+          </div>
+          <div class="chart-bar" style="--w:63%; --c:#f46d6d" title="异人最小距离：1.25">
+            <span class="bar-label">异人 · 1.25</span>
+          </div>
+          <div class="chart-threshold" style="--w:50%" title="判定阈值 1.0">
+            <span class="threshold-label">阈值 1.0</span>
+          </div>
+        </div>
+        <p class="chart-note"><span class="ok-dot"></span>同人距离 0.82 → 识别为本人<br><span class="bad-dot"></span>异人 9 对样本最小 1.25 → 全部正确拒绝</p>
+      </div>
+      <div class="card reveal">
+        <h3>端到端验证</h3>
+        <table class="bench-table">
+          <tr><td>✅ 同人视频签到</td><td class="ok">自动签到成功</td></tr>
+          <tr><td>✅ 异人视频</td><td class="ok">标记未知，不写 CSV</td></tr>
+          <tr><td>✅ 重复签到</td><td class="ok">冷却 + 每日去重拦截</td></tr>
+          <tr><td>✅ 单元测试</td><td class="ok">21 / 21 通过</td></tr>
+          <tr><td>✅ CSV 输出</td><td class="ok">Excel 打开中文不乱码</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section id="faq" class="section alt">
+  <div class="container narrow">
+    <h2 class="reveal">常见问题</h2>
+    <div class="faq reveal">
+      <details>
+        <summary>为什么不用常见的 face_recognition（dlib）库？</summary>
+        <p>dlib 在 Windows 上没有官方预编译包，需要安装 CMake + Visual Studio 编译工具链才能从源码编译，对课程作业不够「开箱即用」。本项目改用 OpenCV 自带的 DNN 模块运行 SFace 模型，纯 pip 安装即可使用。</p>
+      </details>
+      <details>
+        <summary>识别不准确怎么办？</summary>
+        <p>注册时使用光线充足、正面无遮挡的清晰照片；正对摄像头、避免侧脸和逆光。阈值可调：<code>config.py</code> 的 <code>MATCH_TOLERANCE</code>，认不出自己调大到 1.2，误识别调小到 0.8，或运行时用 <code>--tolerance</code> 参数临时覆盖。</p>
+      </details>
+      <details>
+        <summary>没有摄像头怎么演示？</summary>
+        <p>把注册照片生成演示视频：<code>python scripts/make_demo_video.py 照片.jpg demo.mp4</code>，然后 <code>python checkin.py --source demo.mp4 --no-window</code> 即可完整演示签到流程。</p>
+      </details>
+      <details>
+        <summary>模型下载失败 / 网络不好？</summary>
+        <p>每个模型都有 2~3 个备用下载地址自动切换；也可手动下载放到 <code>models/</code> 目录（地址见 config.py）。YOLO 模型缺失时检测自动回退 OpenCV Haar 级联（精度略低）。</p>
+      </details>
+      <details>
+        <summary>同一学生一天能签到几次？</summary>
+        <p>同一天只签到一次：签到后进入 60 秒冷却期（画面标记「冷却中 · 剩余秒数」），冷却结束后当天内不再重复签到；程序重启后读取当天 CSV 继续生效。冷却时长可在 <code>config.py</code> 的 <code>COOLDOWN_SECONDS</code> 调整。</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CTA ============ -->
+<section class="cta-section">
+  <div class="container reveal">
+    <h2>准备好试试了吗？</h2>
+    <p>克隆仓库，三条命令跑通注册 + 签到。</p>
+    <a class="btn btn-primary" href="https://github.com/chnoorlee/Face-Based-Check-in-Mini-Project" target="_blank" rel="noopener">GitHub 仓库</a>
+    <a class="btn btn-outline" href="https://github.com/chnoorlee/Face-Based-Check-in-Mini-Project#readme" target="_blank" rel="noopener">完整文档</a>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="container footer-inner">
+    <span>课堂自动人脸签到系统 · 课程 3320</span>
+    <span class="dim">MIT License · YOLOv8-Face / SFace / YuNet 版权归各自作者所有，仅供教学使用</span>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
