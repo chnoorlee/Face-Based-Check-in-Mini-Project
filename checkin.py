@@ -176,6 +176,7 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE)
 
     print("开始实时签到...（按 q 退出）")
     frames, t0, show = 0, time.monotonic(), show_window
+    ever_visible = False   # 窗口是否曾经可见（用于区分"窗口被用户关闭"与"环境本就不显示窗口"）
     try:
         while True:
             ok, frame = cap.read()
@@ -196,7 +197,12 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE)
                 try:
                     cv2.imshow(WINDOW_NAME, frame)
                     key = cv2.waitKey(1) & 0xFF
-                    if key == ord("q") or cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
+                    # 窗口可见性：无桌面会话等环境下窗口永远不可见（返回 0），不能当作
+                    # "用户关闭窗口"；仅在窗口曾可见、之后变为不可见时才退出
+                    visible = cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE)
+                    if visible >= 1:
+                        ever_visible = True
+                    if key == ord("q") or (ever_visible and 0 <= visible < 1):
                         break
                 except cv2.error:
                     # 无图形环境（如服务器），自动切换为纯控制台模式
