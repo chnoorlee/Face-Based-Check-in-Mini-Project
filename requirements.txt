@@ -1,0 +1,8 @@
+# 课堂自动人脸签到系统（课程 3320）依赖清单
+# 安装方法见 README.md
+# 人脸特征提取使用 OpenCV 自带的 DNN 模块（SFace 模型），无需编译任何库
+
+numpy>=1.24
+opencv-python>=4.8,<5
+Pillow>=9.0
+ultralytics>=8.2
