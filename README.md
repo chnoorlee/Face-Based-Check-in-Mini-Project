@@ -1,5 +1,9 @@
 # 课堂自动人脸签到系统（课程 3320）
 
+[![CI](https://github.com/chnoorlee/Face-Based-Check-in-Mini-Project/actions/workflows/ci.yml/badge.svg)](https://github.com/chnoorlee/Face-Based-Check-in-Mini-Project/actions)
+[![Release](https://img.shields.io/badge/release-v1.2.0-7c6cff)](https://github.com/chnoorlee/Face-Based-Check-in-Mini-Project/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > 🌐 项目宣传页（GitHub Pages）：https://chnoorlee.github.io/Face-Based-Check-in-Mini-Project/
 
 基于 **Python + YOLO-Face + 人脸特征比对** 的课堂自动签到课程项目。
