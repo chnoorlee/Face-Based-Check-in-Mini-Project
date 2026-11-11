@@ -70,8 +70,12 @@ def draw_detections(frame, detections):
             text = _STATUS_TEXT["unknown"]
         else:
             color = (0, 200, 0) if det.status == "new" else (0, 180, 255)  # 绿=新签到 黄=已签到/冷却
+            if det.status == "cooldown" and getattr(det, "cooldown_left", None) is not None:
+                status_txt = f"{_STATUS_TEXT['cooldown']} {max(int(det.cooldown_left), 0)}s"
+            else:
+                status_txt = _STATUS_TEXT[det.status]
             dist = f" {det.distance:.2f}" if det.distance is not None else ""
-            text = f"{det.name} · {_STATUS_TEXT[det.status]}{dist}"
+            text = f"{det.name} · {status_txt}{dist}"
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         labels.append((text, (x1, max(y1 - 28, 2)), color))
 

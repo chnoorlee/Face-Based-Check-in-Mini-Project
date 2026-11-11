@@ -61,6 +61,7 @@ class Detection:
     name: Optional[str] = None          # 识别出的姓名；未知人员为 None
     distance: Optional[float] = None    # 与特征库最佳匹配的距离
     status: str = "unknown"             # new / cooldown / checked_in / unknown
+    cooldown_left: Optional[float] = None  # 冷却剩余秒数（status=cooldown 时有值）
 
 
 class CheckinEngine:
@@ -93,6 +94,7 @@ class CheckinEngine:
             if embedding is None:
                 continue    # 人脸太小或特征提取失败，跳过
             name, dist = find_best_match(embedding, self.database, self.tolerance)
+            cooldown_left = None
             if name is None:
                 # 与特征库都不匹配 -> 未知人员，只标记不签到
                 status = "unknown"
@@ -101,8 +103,12 @@ class CheckinEngine:
                     self._last_unknown_log = now
                     events.append("⚠️ 检测到未知人员（不在特征库中）")
             elif name in self.checked_today:
-                # 今天已签过：冷却期内显示"冷却中"，之后显示"已签到"
-                status = "cooldown" if self._in_cooldown(name) else "checked_in"
+                # 今天已签过：冷却期内显示"冷却中（剩余秒数）"，之后显示"已签到"
+                if self._in_cooldown(name):
+                    status = "cooldown"
+                    cooldown_left = self.cooldown - (time.monotonic() - self.last_checkin[name])
+                else:
+                    status = "checked_in"
             else:
                 # 第一次识别到该学生 -> 自动完成签到
                 row = self.recorder.record(name)
@@ -111,7 +117,8 @@ class CheckinEngine:
                 self.new_today.append(name)
                 status = "new"
                 events.append(f"✅ [签到成功] {name}（{row['签到时间']}）")
-            detections.append(Detection(box=box, name=name, distance=dist, status=status))
+            detections.append(Detection(box=box, name=name, distance=dist,
+                                        status=status, cooldown_left=cooldown_left))
         return detections, events
 
     def _in_cooldown(self, name) -> bool:
@@ -120,10 +127,11 @@ class CheckinEngine:
         return last is not None and time.monotonic() - last < self.cooldown
 
 
-def run_console(source=None, show_window=SHOW_WINDOW):
+def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE):
     """控制台方式运行实时签到。
 
     source：摄像头编号（int）或视频文件路径（str），None 表示使用默认摄像头。
+    tolerance：识别阈值，可临时覆盖 config.py 中的 MATCH_TOLERANCE（便于课堂演示调参）。
     返回退出码：0 成功，1 失败。
     """
     database = FeatureDatabase().load_all()
@@ -148,8 +156,8 @@ def run_console(source=None, show_window=SHOW_WINDOW):
         return 1
 
     recorder = AttendanceRecorder()
-    engine = CheckinEngine(detector, embedder, database, recorder)
-    print(f"今日已签到：{len(engine.checked_today)} 人；冷却时间：{engine.cooldown} 秒")
+    engine = CheckinEngine(detector, embedder, database, recorder, tolerance=tolerance)
+    print(f"今日已签到：{len(engine.checked_today)} 人；冷却时间：{engine.cooldown} 秒；识别阈值：{engine.tolerance}")
 
     cap = cv2.VideoCapture(source if source is not None else CAMERA_INDEX)
     if not cap.isOpened():
@@ -159,6 +167,12 @@ def run_console(source=None, show_window=SHOW_WINDOW):
         print("   3) 可在 config.py 中修改 CAMERA_INDEX（外接摄像头可尝试 1）")
         print("   演示可用视频文件：python checkin.py --source 视频.mp4 --no-window")
         return 1
+
+    if not isinstance(source, str):
+        # 摄像头刚打开时自动曝光未稳定，前几帧画面偏暗，预热几帧可提升识别稳定性
+        print("摄像头预热中（等待自动曝光稳定）...")
+        for _ in range(5):
+            cap.read()
 
     print("开始实时签到...（按 q 退出）")
     frames, t0, show = 0, time.monotonic(), show_window
@@ -210,12 +224,14 @@ def main():
     parser = argparse.ArgumentParser(description="课堂人脸签到系统 - 实时签到模块")
     parser.add_argument("--source", "-s", help="视频源：摄像头编号或视频文件路径（默认摄像头 0）")
     parser.add_argument("--no-window", action="store_true", help="不显示画面窗口，仅控制台输出")
+    parser.add_argument("--tolerance", "-t", type=float, default=MATCH_TOLERANCE,
+                        help=f"识别阈值（欧氏距离，默认 {MATCH_TOLERANCE}，越小越严格）")
     args = parser.parse_args()
 
     source = args.source
     if source is not None and source.isdigit():
         source = int(source)
-    return run_console(source=source, show_window=not args.no_window)
+    return run_console(source=source, show_window=not args.no_window, tolerance=args.tolerance)
 
 
 if __name__ == "__main__":

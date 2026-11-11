@@ -57,6 +57,8 @@ def test_cooldown_prevents_repeat_checkin(tmp_path):
     engine.process_frame(np.zeros((200, 200, 3), np.uint8))          # 第一次：签到
     detections, events = engine.process_frame(np.zeros((200, 200, 3), np.uint8))  # 紧接着：冷却中
     assert detections[0].status == "cooldown"
+    assert detections[0].cooldown_left is not None
+    assert 0 < detections[0].cooldown_left <= 60   # 冷却剩余秒数
     assert events == []
     lines = recorder.path.read_text(encoding="utf-8-sig").strip().splitlines()
     assert len(lines) == 2   # 表头 + 1 条记录，没有重复写入

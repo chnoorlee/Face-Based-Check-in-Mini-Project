@@ -83,7 +83,11 @@ def main():
     handlers = {"1": cmd_register, "2": cmd_checkin, "3": cmd_info}
     while True:
         print(MENU)
-        choice = input("请选择功能 [1-4]: ").strip()
+        try:
+            choice = input("请选择功能 [1-4]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n再见！")
+            break
         if choice in handlers:
             handlers[choice]()
         elif choice == "4":
