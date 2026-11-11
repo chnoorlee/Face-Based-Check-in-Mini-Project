@@ -55,3 +55,17 @@ DETECT_IMG_SIZE = 640
 CAMERA_INDEX = 0         # 摄像头编号：笔记本内置一般为 0，外接摄像头可改为 1
 SHOW_WINDOW = True       # 是否显示实时画面窗口（无图形环境时改为 False）
 WINDOW_NAME = "课堂人脸签到 - 按 q 退出"
+
+
+def validate_config():
+    """启动前校验配置取值范围，返回警告信息列表（空列表表示全部合法）。"""
+    warnings = []
+    if not 0 < MATCH_TOLERANCE <= 2:
+        warnings.append(f"MATCH_TOLERANCE={MATCH_TOLERANCE} 超出合理范围 (0, 2]（归一化特征欧氏距离取值 0~2）")
+    if COOLDOWN_SECONDS <= 0:
+        warnings.append(f"COOLDOWN_SECONDS={COOLDOWN_SECONDS} 必须为正数")
+    if not 0 < DETECT_CONFIDENCE <= 1:
+        warnings.append(f"DETECT_CONFIDENCE={DETECT_CONFIDENCE} 必须在 (0, 1] 范围内（置信度概率）")
+    if not isinstance(CAMERA_INDEX, int) or CAMERA_INDEX < -1:
+        warnings.append(f"CAMERA_INDEX={CAMERA_INDEX!r} 应为非负整数（外接摄像头一般用 0 或 1）")
+    return warnings

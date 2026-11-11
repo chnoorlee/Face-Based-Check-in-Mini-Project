@@ -19,7 +19,7 @@ try:
 except Exception:
     pass
 
-from config import LOG_DIR  # noqa: E402
+from config import LOG_DIR, validate_config  # noqa: E402
 from utils.imutils import ensure_dirs  # noqa: E402
 
 BANNER = """
@@ -38,14 +38,16 @@ MENU = """  1. 人脸注册    （上传照片，录入特征库）
 
 
 def setup_logging():
-    """日志同时输出到控制台与 data/logs/ 下的日志文件"""
+    """日志同时输出到控制台与 data/logs/ 下的日志文件（按大小轮转，1MB × 3 份）"""
+    from logging.handlers import RotatingFileHandler
     ensure_dirs(LOG_DIR)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(LOG_DIR / f"app_{datetime.now():%Y%m%d}.log", encoding="utf-8"),
+            RotatingFileHandler(LOG_DIR / f"app_{datetime.now():%Y%m%d}.log",
+                                maxBytes=1024 * 1024, backupCount=3, encoding="utf-8"),
         ],
     )
 
@@ -79,6 +81,8 @@ def cmd_info():
 
 def main():
     setup_logging()
+    for warning in validate_config():
+        print("⚠️ 配置警告：", warning)
     print(BANNER)
     handlers = {"1": cmd_register, "2": cmd_checkin, "3": cmd_info}
     while True:

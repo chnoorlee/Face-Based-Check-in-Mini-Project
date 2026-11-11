@@ -1,0 +1,26 @@
+# GitHub Actions 持续集成：每次 push / PR 自动运行单元测试与覆盖率门禁
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装 CPU 版 PyTorch
+        run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: 安装项目依赖
+        run: pip install -r requirements.txt "pytest>=8.0" "pytest-cov>=5.0"
+
+      - name: 运行测试（覆盖率门禁 80%）
+        run: pytest --cov --cov-report=term-missing --cov-fail-under=80

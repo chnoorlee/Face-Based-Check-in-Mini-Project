@@ -36,7 +36,7 @@ except Exception:
 import cv2  # noqa: E402
 
 from config import (CAMERA_INDEX, COOLDOWN_SECONDS, MATCH_TOLERANCE,  # noqa: E402
-                    SHOW_WINDOW, WINDOW_NAME)
+                    SHOW_WINDOW, WINDOW_NAME, validate_config)
 from utils.drawing import draw_detections  # noqa: E402
 from utils.face_detector import FaceDetector  # noqa: E402
 from utils.face_embedder import FaceEmbedder  # noqa: E402
@@ -127,7 +127,7 @@ class CheckinEngine:
         return last is not None and time.monotonic() - last < self.cooldown
 
 
-def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE):
+def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE):  # pragma: no cover - 摄像头/视频硬件循环
     """控制台方式运行实时签到。
 
     source：摄像头编号（int）或视频文件路径（str），None 表示使用默认摄像头。
@@ -221,6 +221,8 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE)
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    for warning in validate_config():
+        print("⚠️ 配置警告：", warning)
     parser = argparse.ArgumentParser(description="课堂人脸签到系统 - 实时签到模块")
     parser.add_argument("--source", "-s", help="视频源：摄像头编号或视频文件路径（默认摄像头 0）")
     parser.add_argument("--no-window", action="store_true", help="不显示画面窗口，仅控制台输出")

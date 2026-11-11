@@ -6,6 +6,7 @@
 - find_best_match：特征比对核心函数（找特征库中距离最近的匹配）
 """
 import csv
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +14,8 @@ import numpy as np
 
 from config import ATTENDANCE_DIR, EMBEDDINGS_DIR, FACES_DIR
 from utils.imutils import ensure_dirs, imwrite_unicode, sanitize_filename
+
+logger = logging.getLogger(__name__)
 
 
 def find_best_match(embedding, database, tolerance):
@@ -83,11 +86,18 @@ class AttendanceRecorder:
         self.path = self.attendance_dir / f"attendance_{self.date}.csv"
 
     def load_checked_names(self) -> set:
-        """读取今天已成功签到的学生名单（用于每日防重复签到）"""
+        """读取今天已成功签到的学生名单（用于每日防重复签到）。
+
+        CSV 损坏或编码异常时记录警告并按空记录处理，保证签到流程不中断。
+        """
         if not self.path.exists():
             return set()
-        with open(self.path, encoding="utf-8-sig", newline="") as f:
-            rows = list(csv.reader(f))
+        try:
+            with open(self.path, encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.reader(f))
+        except (OSError, csv.Error, UnicodeDecodeError) as exc:
+            logger.warning("读取签到记录失败（%s），按空记录处理：%s", self.path, exc)
+            return set()
         checked = set()
         for row in rows[1:]:
             if len(row) >= 3 and row[2] == "是":

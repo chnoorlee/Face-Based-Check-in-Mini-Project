@@ -41,6 +41,8 @@ def register_face(image_path: str, name: str):
     name = (name or "").strip()
     if not name:
         return False, "学生姓名不能为空"
+    if len(name) > 50:
+        return False, "学生姓名过长（最多 50 个字符）"
 
     img = imread_unicode(image_path)   # 用 imread_unicode 支持中文路径
     if img is None:
@@ -80,6 +82,9 @@ def register_face(image_path: str, name: str):
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    from config import validate_config
+    for warning in validate_config():
+        print("⚠️ 配置警告：", warning)
     parser = argparse.ArgumentParser(description="课堂人脸签到系统 - 人脸注册模块")
     parser.add_argument("--image", "-i", help="人脸照片路径（支持中文路径）")
     parser.add_argument("--name", "-n", help="学生姓名")

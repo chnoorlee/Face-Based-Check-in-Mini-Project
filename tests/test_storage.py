@@ -82,3 +82,15 @@ class TestAttendanceRecorder:
     def test_empty_file_returns_empty_set(self, tmp_path):
         rec = AttendanceRecorder(tmp_path)
         assert rec.load_checked_names() == set()
+
+    def test_corrupted_csv_is_tolerated(self, tmp_path):
+        # 模拟 CSV 被写坏（非 UTF-8 字节）——按空记录处理，不崩溃
+        rec = AttendanceRecorder(tmp_path)
+        rec.path.write_bytes(b"\xff\xfe\x00garbage\x9c")
+        assert rec.load_checked_names() == set()
+
+    def test_malformed_rows_are_skipped(self, tmp_path):
+        rec = AttendanceRecorder(tmp_path)
+        rec.path.write_text("学生姓名,签到时间,是否签到成功\n只有一列\n张三,2026-11-11 08:00:00,是\n",
+                            encoding="utf-8-sig")
+        assert rec.load_checked_names() == {"张三"}
