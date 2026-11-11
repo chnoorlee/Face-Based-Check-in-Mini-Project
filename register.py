@@ -80,7 +80,7 @@ def register_face(image_path: str, name: str):
     return True, detail
 
 
-def main():
+def main():  # pragma: no cover - 命令行入口（手工实测覆盖）
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     from config import validate_config
     for warning in validate_config():

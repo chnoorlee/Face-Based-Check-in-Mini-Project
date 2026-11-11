@@ -35,9 +35,11 @@ except ImportError:
 from checkin import CheckinEngine  # noqa: E402
 from config import CAMERA_INDEX  # noqa: E402
 from register import register_face  # noqa: E402
-from utils.drawing import draw_detections  # noqa: E402
+from utils.drawing import (RosterPanel, attach_roster_panel,  # noqa: E402
+                           draw_detections)
 from utils.face_detector import FaceDetector  # noqa: E402
 from utils.face_embedder import FaceEmbedder  # noqa: E402
+from utils.roster import Roster  # noqa: E402
 from utils.storage import AttendanceRecorder, FeatureDatabase  # noqa: E402
 
 IMG_FILETYPES = [("图片文件", "*.jpg *.jpeg *.png *.bmp"), ("所有文件", "*.*")]
@@ -142,7 +144,10 @@ class CheckinWindow(tk.Toplevel):
             self.destroy()
             return
         self.engine, self.cap, self.running = engine, cap, True
-        self.info_var.set(f"检测后端：{detector.backend} | 特征库 {len(database)} 人 | 今日已签到 {len(engine.checked_today)} 人")
+        self.roster = Roster.from_database(database)   # 应到名单 = 全部已注册学生
+        self.panel = RosterPanel()
+        self.info_var.set(f"检测后端：{detector.backend} | 应到 {len(self.roster)} 人"
+                          f" | 已到 {self.roster.progress_text(engine.checked_today)}")
         self._tick()
 
     def _tick(self):
@@ -158,7 +163,12 @@ class CheckinWindow(tk.Toplevel):
         for event in events:
             self._log(event)
         draw_detections(frame, detections)
-        self.info_var.set(f"今日已签到 {len(self.engine.checked_today)} 人 | 特征库 {len(self.engine.database)} 人")
+        frame = attach_roster_panel(
+            frame, self.panel.render(self.roster.names, self.engine.checked_today))
+        absent = self.roster.absent(self.engine.checked_today)
+        self.info_var.set(f"应到 {len(self.roster)} 人 | 已到 "
+                          f"{self.roster.progress_text(self.engine.checked_today)} 人"
+                          f" | 缺勤 {len(absent)} 人")
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         pil = Image.fromarray(rgb)
@@ -170,6 +180,15 @@ class CheckinWindow(tk.Toplevel):
         self.after(self.TICK_MS, self._tick)
 
     def _stop(self):
+        # 关闭窗口时输出本次出勤汇总并写出勤报告
+        if getattr(self, "engine", None) is not None and getattr(self, "roster", None):
+            recorder = self.engine.recorder
+            present = self.roster.present(self.engine.checked_today)
+            absent = self.roster.absent(self.engine.checked_today)
+            report = recorder.write_summary(self.roster.names, self.engine.checked_today)
+            self._log(f"出勤：应到 {len(self.roster)} | 实到 {len(present)} | 缺勤 {len(absent)}")
+            self._log(f"未到：{'、'.join(absent) or '无'}")
+            self._log(f"报告：{report}")
         self.running = False
         if self.cap is not None:
             self.cap.release()

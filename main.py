@@ -32,8 +32,9 @@ BANNER = """
 MENU = """  1. 人脸注册    （上传照片，录入特征库）
   2. 实时签到    （摄像头自动识别签到）
   3. 查看信息    （特征库与今日签到记录）
-  4. 删除学生    （从特征库移除）
-  5. 退出
+  4. 出勤报告    （统计缺勤名单，无需摄像头）
+  5. 删除学生    （从特征库移除）
+  6. 退出
 =========================================
 """
 
@@ -84,8 +85,32 @@ def cmd_info():
     print(f"签到文件：{recorder.path}\n")
 
 
+def cmd_report():
+    """功能 4：生成今日出勤报告（统计缺勤名单，无需摄像头）"""
+    from utils.roster import Roster
+    from utils.storage import AttendanceRecorder, FeatureDatabase
+    path = input("应到名单文件路径（直接回车 = 全部已注册学生）: ").strip().strip('"')
+    db = FeatureDatabase()
+    try:
+        roster = Roster.from_file(path) if path else Roster.from_database(db.load_all())
+    except (FileNotFoundError, ValueError) as exc:
+        print("❌ 读取名单失败：", exc)
+        return
+    if not len(roster):
+        print("❌ 应到名单为空")
+        return
+    recorder = AttendanceRecorder()
+    checked = recorder.load_checked_names()
+    report = recorder.write_summary(roster.names, checked)
+    present, absent = roster.present(checked), roster.absent(checked)
+    print(f"\n出勤：应到 {len(roster)} 人 | 实到 {len(present)} 人 | 缺勤 {len(absent)} 人")
+    print(f"✅ 已到（{len(present)}）：{'、'.join(present) or '无'}")
+    print(f"❌ 未到（{len(absent)}）：{'、'.join(absent) or '无'}")
+    print(f"报告文件：{report}\n")
+
+
 def cmd_delete():
-    """功能 4：删除学生"""
+    """功能 5：删除学生"""
     from utils.storage import FeatureDatabase
     name = input("请输入要删除的学生姓名: ").strip()
     if not name:
@@ -100,21 +125,22 @@ def main():
     for warning in validate_config():
         print("⚠️ 配置警告：", warning)
     print(BANNER)
-    handlers = {"1": cmd_register, "2": cmd_checkin, "3": cmd_info, "4": cmd_delete}
+    handlers = {"1": cmd_register, "2": cmd_checkin, "3": cmd_info,
+                "4": cmd_report, "5": cmd_delete}
     while True:
         print(MENU)
         try:
-            choice = input("请选择功能 [1-5]: ").strip()
+            choice = input("请选择功能 [1-6]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n再见！")
             break
         if choice in handlers:
             handlers[choice]()
-        elif choice == "5":
+        elif choice == "6":
             print("再见！")
             break
         else:
-            print("输入无效，请输入 1-5\n")
+            print("输入无效，请输入 1-6\n")
 
 
 if __name__ == "__main__":

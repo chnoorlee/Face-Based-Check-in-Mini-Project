@@ -37,9 +37,11 @@ import cv2  # noqa: E402
 
 from config import (CAMERA_INDEX, COOLDOWN_SECONDS, MATCH_TOLERANCE,  # noqa: E402
                     SHOW_WINDOW, WINDOW_NAME, validate_config)
-from utils.drawing import draw_detections  # noqa: E402
+from utils.drawing import (RosterPanel, attach_roster_panel,  # noqa: E402
+                           draw_detections)
 from utils.face_detector import FaceDetector  # noqa: E402
 from utils.face_embedder import FaceEmbedder  # noqa: E402
+from utils.roster import Roster  # noqa: E402
 from utils.storage import (AttendanceRecorder, FeatureDatabase,  # noqa: E402
                            find_best_match)
 
@@ -127,11 +129,13 @@ class CheckinEngine:
         return last is not None and time.monotonic() - last < self.cooldown
 
 
-def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE):  # pragma: no cover - 摄像头/视频硬件循环
+def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE,
+                roster=None):  # pragma: no cover - 摄像头/视频硬件循环
     """控制台方式运行实时签到。
 
     source：摄像头编号（int）或视频文件路径（str），None 表示使用默认摄像头。
     tolerance：识别阈值，可临时覆盖 config.py 中的 MATCH_TOLERANCE（便于课堂演示调参）。
+    roster：应到名单（Roster 对象）。为 None 时取特征库中全部已注册学生。
     返回退出码：0 成功，1 失败。
     """
     database = FeatureDatabase().load_all()
@@ -139,6 +143,16 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE)
         print("❌ 特征库为空。请先注册学生人脸：python register.py -i 照片.jpg -n 姓名")
         return 1
     print(f"已加载特征库：{len(database)} 人（{'、'.join(database)}）")
+
+    # 应到名单：默认全部已注册学生；指定名单文件时以文件为准
+    roster = roster if roster is not None else Roster.from_database(database)
+    if not len(roster):
+        print("❌ 应到名单为空，无法统计出勤")
+        return 1
+    missing = roster.unregistered(database)
+    if missing:
+        print(f"⚠️ 名单中 {len(missing)} 人未注册人脸，无法被识别：{'、'.join(missing)}")
+    print(f"应到 {len(roster)} 人：{'、'.join(roster.names)}")
 
     print("正在初始化人脸检测模型（首次运行需要一点时间）...")
     try:
@@ -157,7 +171,9 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE)
 
     recorder = AttendanceRecorder()
     engine = CheckinEngine(detector, embedder, database, recorder, tolerance=tolerance)
-    print(f"今日已签到：{len(engine.checked_today)} 人；冷却时间：{engine.cooldown} 秒；识别阈值：{engine.tolerance}")
+    print(f"今日已签到：{len(engine.checked_today)} 人；应到：{len(roster)} 人"
+          f"（已到 {roster.progress_text(engine.checked_today)}）")
+    print(f"冷却时间：{engine.cooldown} 秒；识别阈值：{engine.tolerance}")
 
     cap = cv2.VideoCapture(source if source is not None else CAMERA_INDEX)
     if not cap.isOpened():
@@ -176,6 +192,7 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE)
 
     print("开始实时签到...（按 q 退出）")
     frames, t0, show = 0, time.monotonic(), show_window
+    panel = RosterPanel()
     ever_visible = False   # 窗口是否曾经可见（用于区分"窗口被用户关闭"与"环境本就不显示窗口"）
     try:
         while True:
@@ -185,14 +202,21 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE)
                 break
 
             detections, events = engine.process_frame(frame)
+            new_checkin = False
             for event in events:
                 print(event)
+                if event.startswith("✅"):
+                    new_checkin = True
+            if new_checkin:
+                print(f"   → 已到 {roster.progress_text(engine.checked_today)} 人")
             frames += 1
 
             if show:
                 draw_detections(frame, detections)   # 仅显示画面时才绘制标注（无窗口模式省去 PIL 开销）
+                frame = attach_roster_panel(
+                    frame, panel.render(roster.names, engine.checked_today))
                 fps = frames / max(time.monotonic() - t0, 1e-6)
-                cv2.putText(frame, f"FPS {fps:.1f} | Checked {len(engine.checked_today)} | Press q to quit",
+                cv2.putText(frame, f"FPS {fps:.1f} | {roster.progress_text(engine.checked_today)} | Press q to quit",
                             (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
                 try:
                     cv2.imshow(WINDOW_NAME, frame)
@@ -217,15 +241,22 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE)
         cv2.destroyAllWindows()
 
     elapsed = time.monotonic() - t0
+    present = roster.present(engine.checked_today)
+    absent = roster.absent(engine.checked_today)
+    report_path = recorder.write_summary(roster.names, engine.checked_today)
+
     print("=" * 46)
     print(f"本次运行新签到 {len(engine.new_today)} 人：{'、'.join(engine.new_today) or '无'}")
-    print(f"今日累计签到 {len(engine.checked_today)} 人")
-    print(f"签到记录文件：{recorder.path}")
+    print(f"出勤：应到 {len(roster)} 人 | 实到 {len(present)} 人 | 缺勤 {len(absent)} 人")
+    print(f"✅ 已到（{len(present)}）：{'、'.join(present) or '无'}")
+    print(f"❌ 未到（{len(absent)}）：{'、'.join(absent) or '无'}")
+    print(f"签到明细：{recorder.path}")
+    print(f"出勤报告：{report_path}")
     print(f"平均处理速度：{frames / max(elapsed, 1e-6):.1f} 帧/秒")
     return 0
 
 
-def main():
+def main():  # pragma: no cover - 命令行入口（手工实测覆盖）
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     for warning in validate_config():
         print("⚠️ 配置警告：", warning)
@@ -234,16 +265,31 @@ def main():
     parser.add_argument("--no-window", action="store_true", help="不显示画面窗口，仅控制台输出")
     parser.add_argument("--tolerance", "-t", type=float, default=MATCH_TOLERANCE,
                         help=f"识别阈值（欧氏距离，默认 {MATCH_TOLERANCE}，越小越严格）")
+    parser.add_argument("--roster", "-r", metavar="名单文件",
+                        help="应到名单（.txt 每行一个姓名 / .csv 第一列）；不指定则默认全部已注册学生")
     args = parser.parse_args()
 
     if not 0 < args.tolerance <= 2:
         print("❌ --tolerance 必须在 (0, 2] 范围内（归一化特征欧氏距离取值 0~2）")
         return 1
 
+    roster = None
+    if args.roster:
+        try:
+            roster = Roster.from_file(args.roster)
+        except (FileNotFoundError, ValueError) as exc:
+            print("❌ 读取名单失败：", exc)
+            return 1
+        if not len(roster):
+            print("❌ 名单文件为空：", args.roster)
+            return 1
+        print(f"已加载应到名单：{args.roster}（{len(roster)} 人）")
+
     source = args.source
     if source is not None and source.isdigit():
         source = int(source)
-    return run_console(source=source, show_window=not args.no_window, tolerance=args.tolerance)
+    return run_console(source=source, show_window=not args.no_window,
+                       tolerance=args.tolerance, roster=roster)
 
 
 if __name__ == "__main__":

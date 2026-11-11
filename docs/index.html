@@ -49,7 +49,7 @@
   <div class="container hero-inner">
     <div class="badge reveal">课程 3320 · Python 课程作业 · 开源 MIT</div>
     <h1 class="reveal">课堂<span class="grad">自动人脸签到</span>系统</h1>
-    <p class="sub reveal">上传一张照片完成注册，摄像头扫一眼自动签到。<br>YOLO-Face 检测 + SFace 特征比对，冷却防重复，CSV 一键导出，纯 pip 安装零编译。</p>
+    <p class="sub reveal">上传一张照片完成注册，摄像头扫一眼自动打勾签到。<br>结束自动输出<b>没来的人</b>——YOLO-Face 检测 + SFace 特征比对，冷却防重复，纯 pip 安装零编译。</p>
     <div class="cta reveal">
       <a class="btn btn-primary" href="#quickstart">立即开始</a>
       <a class="btn btn-outline" href="https://github.com/chnoorlee/Face-Based-Check-in-Mini-Project" target="_blank" rel="noopener">查看源码 →</a>
@@ -90,8 +90,15 @@
         <h3>防重复签到</h3>
         <p><strong>冷却期</strong>：签到成功后 60 秒内同一学生不再重复签到，画面标记「冷却中 · 剩余秒数」；<strong>每日去重</strong>：同一天只签到一次，程序重启后读取当天 CSV 继续生效，双重保险。</p>
       </div>
-      <div class="card reveal">
+      <div class="card wide reveal">
         <div class="icon" style="--ic:#f6c453">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l2 2 4-4"/><rect x="3" y="4" width="18" height="17" rx="2.5"/><path d="M8 2v4M16 2v4M3 9h18"/></svg>
+        </div>
+        <h3>应到名单 · 打勾 · 缺勤名单</h3>
+        <p>默认以特征库全部学生为应到名单，也可用 <code>--roster 名单.txt</code> 指定本次课堂名单。画面右侧名单侧栏识别到本人立刻打 <b style="color:#3dd68c">✅</b>；结束时自动列出<b>没来的人</b>，并生成逐人标记「已到 / 缺勤」的出勤报告 CSV。名单里有人未注册人脸会提前提示。</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon" style="--ic:#8ab4ff">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
         </div>
         <h3>CSV 签到记录</h3>
@@ -141,8 +148,8 @@
           <li><b>摄像头取帧</b><small>自动曝光预热 5 帧，画面更稳</small></li>
           <li><b>YOLO-Face 检测</b><small>逐帧检测画面中的所有人脸</small></li>
           <li><b>提取特征并比对</b><small>欧氏距离 ≤ 阈值 → 识别成功</small></li>
-          <li><b>自动签到</b><small>冷却 60s + 每日去重防重复</small></li>
-          <li><b>写入 CSV</b><small>姓名 / 时间 / 是否成功</small></li>
+          <li><b>自动签到 + 打勾</b><small>侧栏名单立刻 ✅，冷却 60s 防重复</small></li>
+          <li><b>输出缺勤名单</b><small>对照应到名单 → 没来的人 + 出勤报告</small></li>
         </ol>
       </div>
     </div>
@@ -193,11 +200,18 @@
       <div class="term-line">
         <span class="prompt">$</span> <span class="cmd">python checkin.py</span>
         <button class="copy-btn" data-copy="python checkin.py" title="复制">复制</button>
-        <span class="cmt"># 摄像头实时签到，按 q 退出</span>
+        <span class="cmt"># 摄像头实时签到（应到 = 全部已注册学生）</span>
+      </div>
+      <div class="term-line">
+        <span class="prompt">$</span> <span class="cmd">python checkin.py --roster 名单.txt</span>
+        <button class="copy-btn" data-copy="python checkin.py --roster 名单.txt" title="复制">复制</button>
+        <span class="cmt"># 或指定本次课堂应到名单，按 q 退出</span>
       </div>
       <div class="term-out">
         <span class="ok">✅ [签到成功] 张三（2026-11-11 10:23:45）</span>
         <span class="dim">⚠️ 检测到未知人员（不在特征库中）</span>
+        <span class="ok">出勤：应到 30 人 | 实到 26 人 | 缺勤 4 人</span>
+        <span class="bad">❌ 未到（4）：赵六、钱七、孙八、周九</span>
       </div>
     </div>
     <p class="hint reveal">无摄像头也能演示：<code>python scripts/make_demo_video.py 照片.jpg demo.mp4</code> 然后 <code>python checkin.py --source demo.mp4 --no-window</code>。图形界面运行 <code>python gui.py</code>，控制台菜单运行 <code>python main.py</code>。</p>
@@ -264,6 +278,10 @@
       <details>
         <summary>同一学生一天能签到几次？</summary>
         <p>同一天只签到一次：签到后进入 60 秒冷却期（画面标记「冷却中 · 剩余秒数」），冷却结束后当天内不再重复签到；程序重启后读取当天 CSV 继续生效。冷却时长可在 <code>config.py</code> 的 <code>COOLDOWN_SECONDS</code> 调整。</p>
+      </details>
+      <details>
+        <summary>缺勤名单是怎么算出来的？</summary>
+        <p>以「应到名单」为基准逐个比对当天签到记录：应到名单默认是特征库里所有已注册学生，也可以用 <code>--roster 名单.txt</code> 指定本次课堂名单（每行一个姓名，或 Excel 导出的 CSV 第一列）。签到结束时控制台打印缺勤名单，同时生成 <code>attendance_YYYY-MM-DD_report.csv</code>，每人一行标记「已到 / 缺勤」。不接摄像头也能用 <code>python main.py</code> 菜单的「4. 出勤报告」重新统计。</p>
       </details>
     </div>
   </div>

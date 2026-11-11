@@ -113,3 +113,26 @@ class TestAttendanceRecorder:
         rec.path.write_text("学生姓名,签到时间,是否签到成功\n只有一列\n张三,2026-11-11 08:00:00,是\n",
                             encoding="utf-8-sig")
         assert rec.load_checked_names() == {"张三"}
+
+    def test_load_records_maps_name_to_time(self, tmp_path):
+        rec = AttendanceRecorder(tmp_path)
+        rec.record("张三")
+        records = rec.load_records()
+        assert set(records) == {"张三"}
+        assert records["张三"].startswith("20")
+
+    def test_write_summary_marks_present_and_absent(self, tmp_path):
+        rec = AttendanceRecorder(tmp_path)
+        rec.record("张三")
+        path = rec.write_summary(["张三", "李四"], {"张三"})
+        lines = path.read_text(encoding="utf-8-sig").strip().splitlines()
+        assert lines[0] == "学生姓名,状态,签到时间"
+        assert lines[1].startswith("张三,已到,")
+        assert lines[2] == "李四,缺勤,"
+
+    def test_write_summary_without_any_checkin(self, tmp_path):
+        rec = AttendanceRecorder(tmp_path)
+        path = rec.write_summary(["张三", "李四"], set())
+        lines = path.read_text(encoding="utf-8-sig").strip().splitlines()
+        assert len(lines) == 3
+        assert all("缺勤" in line for line in lines[1:])

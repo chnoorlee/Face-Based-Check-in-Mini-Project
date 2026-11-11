@@ -56,6 +56,76 @@ def _put_text_fallback(frame, text, pos, color_bgr):
     cv2.putText(frame, text, pos, cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_bgr, 2, cv2.LINE_AA)
 
 
+class RosterPanel:
+    """签到名单侧栏：显示应到学生与打勾状态。
+
+    画面右侧显示「应到 X 人 / 已到 Y 人」和逐人勾选状态，签到成功即打勾。
+    侧栏图像带缓存，只有签到状态变化时才重绘，不影响实时帧率。
+    """
+
+    ROW_H = 34
+    MAX_ROWS = 18   # 名单过长时只显示前 N 人，其余在控制台查看
+
+    def __init__(self, title="签到名单", width=250):
+        self.title = title
+        self.width = width
+        self._cache_key = None
+        self._cache_img = None
+
+    def render(self, names, checked):
+        """返回侧栏图像（OpenCV BGR 格式）"""
+        key = (tuple(names), tuple(n for n in names if n in checked))
+        if key != self._cache_key:
+            self._cache_img = self._build(names, checked)
+            self._cache_key = key
+        return self._cache_img
+
+    def _build(self, names, checked):
+        shown = list(names[: self.MAX_ROWS])
+        overflow = len(names) - len(shown)
+        height = 78 + self.ROW_H * len(shown) + (28 if overflow > 0 else 0) + 12
+
+        img = Image.new("RGB", (self.width, height), (18, 24, 38))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([0, 0, self.width - 1, height - 1], outline=(48, 60, 92))
+
+        present = sum(1 for n in names if n in checked)
+        draw.text((14, 12), self.title, font=_load_font(20) or ImageFont.load_default(),
+                  fill=(232, 236, 248))
+        draw.text((14, 42), f"已到 {present} / {len(names)} 人",
+                  font=_load_font(16) or ImageFont.load_default(), fill=(151, 161, 189))
+
+        font = _load_font(17) or ImageFont.load_default()
+        y = 78
+        for name in shown:
+            done = name in checked
+            color = (61, 214, 140) if done else (110, 120, 145)
+            # 勾选框
+            draw.rounded_rectangle([14, y + 5, 31, y + 22], radius=5, outline=color, width=2)
+            if done:   # 打勾
+                draw.line([(17, y + 14), (21, y + 18), (28, y + 9)], fill=color, width=3)
+            draw.text((41, y), name, font=font,
+                      fill=(232, 236, 248) if done else (151, 161, 189))
+            y += self.ROW_H
+
+        if overflow > 0:
+            draw.text((14, y + 2), f"…另有 {overflow} 人（见控制台）",
+                      font=_load_font(14) or ImageFont.load_default(), fill=(110, 120, 145))
+
+        return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
+
+
+def attach_roster_panel(frame, panel_bgr):
+    """把名单侧栏拼接到画面右侧"""
+    if panel_bgr is None:
+        return frame
+    h = max(frame.shape[0], panel_bgr.shape[0])
+    canvas = np.full((h, frame.shape[1] + panel_bgr.shape[1], 3), (18, 24, 38), dtype=np.uint8)
+    canvas[: frame.shape[0], : frame.shape[1]] = frame
+    canvas[: panel_bgr.shape[0], frame.shape[1]:] = panel_bgr
+    return canvas
+
+
 def draw_detections(frame, detections):
     """在画面上绘制所有识别结果（人脸框 + 标签）。
 

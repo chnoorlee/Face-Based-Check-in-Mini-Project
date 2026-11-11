@@ -110,19 +110,41 @@ class AttendanceRecorder:
 
         CSV 损坏或编码异常时记录警告并按空记录处理，保证签到流程不中断。
         """
+        return set(self.load_records().keys())
+
+    def load_records(self) -> dict:
+        """读取今天已成功签到的明细：{姓名: 签到时间}。"""
         if not self.path.exists():
-            return set()
+            return {}
         try:
             with open(self.path, encoding="utf-8-sig", newline="") as f:
                 rows = list(csv.reader(f))
         except (OSError, csv.Error, UnicodeDecodeError) as exc:
             logger.warning("读取签到记录失败（%s），按空记录处理：%s", self.path, exc)
-            return set()
-        checked = set()
+            return {}
+        records = {}
         for row in rows[1:]:
             if len(row) >= 3 and row[2] == "是":
-                checked.add(row[0])
-        return checked
+                records.setdefault(row[0], row[1])
+        return records
+
+    def write_summary(self, roster_names, checked_names) -> Path:
+        """写出勤报告 CSV：应到名单中每人一行，标记 已到 / 缺勤。
+
+        文件名：attendance_YYYY-MM-DD_report.csv（与明细表同目录）
+        列为：学生姓名, 状态, 签到时间
+        """
+        records = self.load_records()
+        path = self.attendance_dir / f"attendance_{self.date}_report.csv"
+        with open(path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["学生姓名", "状态", "签到时间"])
+            for name in roster_names:
+                if name in checked_names:
+                    writer.writerow([name, "已到", records.get(name, "")])
+                else:
+                    writer.writerow([name, "缺勤", ""])
+        return path
 
     def record(self, name, success=True) -> dict:
         """追加一条签到记录，返回写入的行内容"""
