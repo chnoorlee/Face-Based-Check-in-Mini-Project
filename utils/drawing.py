@@ -21,6 +21,7 @@ _STATUS_TEXT = {
     "cooldown": "冷却中",
     "checked_in": "已签到",
     "unknown": "未知人员",
+    "error": "写入失败",
 }
 
 # 常见中文字体路径（按平台尝试）
@@ -73,7 +74,9 @@ class RosterPanel:
         self._cache_img = None
 
     def render(self, names, checked):
-        """返回侧栏图像（OpenCV BGR 格式）"""
+        """返回侧栏图像（OpenCV BGR 格式）；Pillow 不可用时返回 None（不显示侧栏）"""
+        if not _PIL_AVAILABLE:
+            return None
         key = (tuple(names), tuple(n for n in names if n in checked))
         if key != self._cache_key:
             self._cache_img = self._build(names, checked)
@@ -139,7 +142,12 @@ def draw_detections(frame, detections):
             color = (0, 0, 255)          # 红色：未知人员
             text = _STATUS_TEXT["unknown"]
         else:
-            color = (0, 200, 0) if det.status == "new" else (0, 180, 255)  # 绿=新签到 黄=已签到/冷却
+            if det.status == "new":
+                color = (0, 200, 0)      # 绿：新签到
+            elif det.status == "error":
+                color = (0, 0, 255)      # 红：写入失败
+            else:
+                color = (0, 180, 255)    # 黄：已签到 / 冷却中
             if det.status == "cooldown" and getattr(det, "cooldown_left", None) is not None:
                 status_txt = f"{_STATUS_TEXT['cooldown']} {max(int(det.cooldown_left), 0)}s"
             else:

@@ -48,33 +48,45 @@ class Roster:
         支持 UTF-8（含 BOM）与 GBK 编码，兼容 Excel 导出的名单。
         """
         p = Path(path)
-        if not p.exists():
-            raise FileNotFoundError(f"名单文件不存在：{path}")
-        text = None
+        if not p.is_file():
+            raise FileNotFoundError(f"名单文件不存在或不是文件：{path}")
+
+        text, used_encoding = None, None
         for enc in ("utf-8-sig", "gbk"):
             try:
                 text = p.read_text(encoding=enc)
+                used_encoding = enc
                 break
             except UnicodeDecodeError:
                 continue
+            except OSError as exc:      # 权限、被占用、是目录等
+                raise ValueError(f"无法读取名单文件（{exc}）：{path}") from exc
         if text is None:
             raise ValueError(f"名单文件编码无法识别（请另存为 UTF-8）：{path}")
+        if used_encoding == "gbk":
+            print(f"⚠️ 名单文件按 GBK 解码（{p.name}）；若中文出现乱码，请用 Excel 另存为 UTF-8 CSV")
 
         names, from_file_leave = [], set()
         is_csv = p.suffix.lower() == ".csv"
         if is_csv:
             # 用标准 csv 解析，正确处理带引号、含逗号的字段
-            rows = list(csv.reader(io.StringIO(text)))
-            for i, cells in enumerate(rows):
+            try:
+                rows = list(csv.reader(io.StringIO(text)))
+            except csv.Error as exc:
+                raise ValueError(f"名单 CSV 格式错误：{exc}") from exc
+            first_data_row = True
+            for cells in rows:
                 if not cells:
                     continue
                 cells = [c.strip() for c in cells]
                 name = cells[0]
                 if not name or name.startswith("#"):
                     continue
-                # 第一行可能是表头
-                if i == 0 and name in ("学生姓名", "姓名", "name", "Name"):
+                # 只把「第一行有效数据」当作表头判断，避免注释/空行导致表头被当成学生
+                if first_data_row and name in ("学生姓名", "姓名", "name", "Name"):
+                    first_data_row = False
                     continue
+                first_data_row = False
                 # 任意一列含「请假」即视为请假登记
                 if any(m in cell for cell in cells[1:] for m in cls.LEAVE_MARKERS):
                     from_file_leave.add(name)

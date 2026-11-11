@@ -42,18 +42,22 @@ MENU = """  1. 人脸注册    （上传照片，录入特征库）
 
 
 def setup_logging():
-    """日志同时输出到控制台与 data/logs/ 下的日志文件（按大小轮转，1MB × 3 份）"""
+    """日志同时输出到控制台与 data/logs/ 下的日志文件（按大小轮转，1MB × 3 份）。
+
+    日志目录不可写时退化为仅控制台输出，保证程序仍能启动。
+    """
     from logging.handlers import RotatingFileHandler
-    ensure_dirs(LOG_DIR)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            RotatingFileHandler(LOG_DIR / f"app_{datetime.now():%Y%m%d}.log",
-                                maxBytes=1024 * 1024, backupCount=3, encoding="utf-8"),
-        ],
-    )
+    handlers = [logging.StreamHandler()]
+    try:
+        ensure_dirs(LOG_DIR)
+        handlers.append(RotatingFileHandler(
+            LOG_DIR / f"app_{datetime.now():%Y%m%d}.log",
+            maxBytes=1024 * 1024, backupCount=3, encoding="utf-8"))
+    except OSError as exc:
+        print(f"⚠️ 日志文件不可写（{exc}），本次仅输出到控制台")
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s [%(levelname)s] %(message)s",
+                        handlers=handlers)
 
 
 def cmd_register():
@@ -106,7 +110,7 @@ def cmd_report():
     db = FeatureDatabase()
     try:
         roster = Roster.from_file(path) if path else Roster.from_database(db.load_all())
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, OSError) as exc:
         print("❌ 读取名单失败：", exc)
         return
     if not len(roster):
@@ -176,7 +180,13 @@ def main():
             print("\n再见！")
             break
         if choice in handlers:
-            handlers[choice]()
+            try:
+                handlers[choice]()
+            except (EOFError, KeyboardInterrupt):
+                # 管道输入结束或 Ctrl+C：回到菜单而不是抛出堆栈
+                print("\n（已取消）")
+            except OSError as exc:
+                print(f"❌ 操作失败：{exc}")
         elif choice in ("0", "q", "Q"):
             print("再见！")
             break

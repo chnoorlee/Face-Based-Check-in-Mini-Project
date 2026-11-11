@@ -117,47 +117,67 @@ class CheckinWindow(tk.Toplevel):
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
+    def _fail(self, msg):
+        """初始化失败：提示并关闭窗口（统一出口，避免窗口卡在"加载中"）"""
+        messagebox.showerror("错误", msg)
+        self.destroy()
+
     def _init(self):
-        """初始化检测模型、特征库与摄像头"""
-        database = FeatureDatabase().load_all()
-        if not database:
-            messagebox.showerror("错误", "特征库为空，请先在主界面注册学生人脸")
-            self.destroy()
-            return
+        """初始化检测模型、特征库与摄像头（任何异常都要给出可见提示）"""
         try:
+            database = FeatureDatabase().load_all()
+            if not database:
+                self._fail("特征库为空，请先在主界面注册学生人脸")
+                return
             detector = FaceDetector()
-        except RuntimeError as exc:
-            messagebox.showerror("错误", f"人脸检测器初始化失败：{exc}")
-            self.destroy()
-            return
-        embedder = FaceEmbedder()
-        try:
+            embedder = FaceEmbedder()
             embedder.prepare()   # 下载（如需）并加载特征提取模型
-        except RuntimeError as exc:
-            messagebox.showerror("错误", str(exc))
-            self.destroy()
+            recorder = AttendanceRecorder()
+            engine = CheckinEngine(detector, embedder, database, recorder)
+            if recorder.last_read_error:
+                self._fail(f"今日签到记录读取失败（{recorder.last_read_error}）\n"
+                           "请先关闭占用签到 CSV 的程序（如 Excel）后重试")
+                return
+            try:
+                cap = cv2.VideoCapture(CAMERA_INDEX)
+            except (cv2.error, TypeError) as exc:
+                self._fail(f"摄像头参数不合法（CAMERA_INDEX={CAMERA_INDEX!r}）：{exc}")
+                return
+            if not cap.isOpened():
+                self._fail("无法打开摄像头，请检查设备或修改 config.py 中的 CAMERA_INDEX")
+                return
+            self.engine, self.cap, self.running = engine, cap, True
+            self.roster = Roster.from_database(database)   # 应到名单 = 全部已注册学生
+            self.panel = RosterPanel()
+            self.info_var.set(f"检测后端：{detector.backend} | 应到 {len(self.roster)} 人"
+                              f" | 已到 {self.roster.progress_text(engine.checked_today)}")
+        except (RuntimeError, cv2.error, OSError) as exc:
+            self._fail(f"初始化失败：{exc}")
             return
-        engine = CheckinEngine(detector, embedder, database, AttendanceRecorder())
-        cap = cv2.VideoCapture(CAMERA_INDEX)
-        if not cap.isOpened():
-            messagebox.showerror("错误", "无法打开摄像头，请检查设备或修改 config.py 中的 CAMERA_INDEX")
-            self.destroy()
-            return
-        self.engine, self.cap, self.running = engine, cap, True
-        self.roster = Roster.from_database(database)   # 应到名单 = 全部已注册学生
-        self.panel = RosterPanel()
-        self.info_var.set(f"检测后端：{detector.backend} | 应到 {len(self.roster)} 人"
-                          f" | 已到 {self.roster.progress_text(engine.checked_today)}")
         self._tick()
 
     def _tick(self):
-        """定时循环：取帧 -> 识别 -> 绘制 -> 更新画面"""
+        """定时循环：取帧 -> 识别 -> 绘制 -> 更新画面。
+
+        任何异常都不能让循环停摆（否则窗口假死、摄像头不释放），
+        统一捕获、记录到日志区，并在 finally 中重新排期。
+        """
         if not self.running:
             return
+        try:
+            self._process_once()
+        except (cv2.error, OSError, RuntimeError, ValueError) as exc:
+            self._log(f"❌ 运行时错误：{exc}")
+            self.info_var.set(f"出错：{exc}")
+        finally:
+            if self.running:
+                self.after(self.TICK_MS, self._tick)
+
+    def _process_once(self):
+        """处理并显示一帧"""
         ok, frame = self.cap.read()
         if not ok:
             self.info_var.set("读取摄像头画面失败")
-            self.after(100, self._tick)
             return
         detections, events = self.engine.process_frame(frame)
         for event in events:
@@ -177,22 +197,34 @@ class CheckinWindow(tk.Toplevel):
         photo = ImageTk.PhotoImage(pil)
         self.video_label.configure(image=photo)
         self.video_label.image = photo   # 持有引用，防止被垃圾回收
-        self.after(self.TICK_MS, self._tick)
+        # 由 _tick 的 finally 统一重新排期，这里不要再调用 after()
 
     def _stop(self):
-        # 关闭窗口时输出本次出勤汇总并写出勤报告
-        if getattr(self, "engine", None) is not None and getattr(self, "roster", None):
-            recorder = self.engine.recorder
-            present = self.roster.present(self.engine.checked_today)
-            absent = self.roster.absent(self.engine.checked_today)
-            report = recorder.write_summary(self.roster.names, self.engine.checked_today)
-            self._log(f"出勤：应到 {len(self.roster)} | 实到 {len(present)} | 缺勤 {len(absent)}")
-            self._log(f"未到：{'、'.join(absent) or '无'}")
-            self._log(f"报告：{report}")
+        """关闭窗口：输出出勤汇总并写出勤报告。
+
+        报告写入失败不能影响摄像头释放与窗口关闭，因此清理放在 finally。
+        """
+        if not self.running and self.cap is None:
+            self.destroy()
+            return
         self.running = False
-        if self.cap is not None:
-            self.cap.release()
-        self.destroy()
+        try:
+            if getattr(self, "engine", None) is not None and getattr(self, "roster", None):
+                try:
+                    report = self.engine.recorder.write_summary(
+                        self.roster.names, self.engine.checked_today, self.roster.on_leave())
+                    present = self.roster.present(self.engine.checked_today)
+                    absent = self.roster.absent(self.engine.checked_today)
+                    self._log(f"出勤：应到 {len(self.roster)} | 实到 {len(present)} | 缺勤 {len(absent)}")
+                    self._log(f"未到：{'、'.join(absent) or '无'}")
+                    self._log(f"报告：{report}" if report else "⚠️ 签到记录读取失败，未生成报告")
+                except OSError as exc:
+                    self._log(f"⚠️ 出勤报告写入失败：{exc}")
+        finally:
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+            self.destroy()
 
 
 class App(tk.Tk):
@@ -215,12 +247,17 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="人脸注册", command=self._open_register).grid(row=0, column=0, padx=6)
         ttk.Button(btn_frame, text="开始签到", command=self._open_checkin).grid(row=0, column=1, padx=6)
         ttk.Button(btn_frame, text="刷新列表", command=self._refresh).grid(row=0, column=2, padx=6)
-        ttk.Button(btn_frame, text="退出", command=self.destroy).grid(row=0, column=3, padx=6)
+        ttk.Button(btn_frame, text="退出", command=self._quit).grid(row=0, column=3, padx=6)
 
+        self._checkin = None
         self._refresh()
 
     def _refresh(self):
-        names = FeatureDatabase().names()
+        try:
+            names = FeatureDatabase().names()
+        except OSError as exc:
+            messagebox.showerror("错误", f"读取特征库失败：{exc}")
+            return
         self.listbox.delete(0, "end")
         for name in names:
             self.listbox.insert("end", name)
@@ -230,7 +267,17 @@ class App(tk.Tk):
         RegisterDialog(self, self._refresh)
 
     def _open_checkin(self):
-        CheckinWindow(self)
+        self._checkin = CheckinWindow(self)
+
+    def _quit(self):
+        """退出前先关闭签到窗口，确保出勤报告已写出、摄像头已释放"""
+        win = getattr(self, "_checkin", None)
+        try:
+            if win is not None and win.winfo_exists():
+                win._stop()
+        except Exception:
+            pass
+        self.destroy()
 
 
 def main():

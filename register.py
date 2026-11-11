@@ -14,6 +14,8 @@ import logging
 import sys
 from pathlib import Path
 
+import cv2
+
 # 保证从任意目录运行都能找到项目模块
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -48,8 +50,11 @@ def register_face(image_path: str, name: str):
     if img is None:
         return False, f"无法读取图片：{image_path}（请检查路径是否正确，中文路径也支持）"
 
-    detector = FaceDetector()
-    boxes = detector.detect(img)
+    try:
+        detector = FaceDetector()
+        boxes = detector.detect(img)
+    except (RuntimeError, cv2.error) as exc:   # 检测器初始化/推理失败
+        return False, f"人脸检测失败：{exc}"
     if not boxes:
         return False, "未在照片中检测到人脸，请换一张光线充足、正面无遮挡的照片"
     if len(boxes) > 1:
@@ -70,17 +75,26 @@ def register_face(image_path: str, name: str):
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(w, x2), min(h, y2)
 
+    face_crop = img[y1:y2, x1:x2]
+    if face_crop.size == 0:
+        return False, "人脸区域为空，请换一张照片重试"
+
     db = FeatureDatabase()
     overwritten = db.exists(name)
-    db.save(name, embedding, img[y1:y2, x1:x2])
+    try:
+        ok, save_msg = db.save(name, embedding, face_crop)
+    except OSError as exc:      # 磁盘/权限问题
+        return False, f"保存人脸特征失败：{exc}"
+    if not ok:
+        return False, save_msg
 
-    detail = f"注册成功！姓名：{name} | 检测后端：{detector.backend}"
+    detail = f"注册成功！姓名：{name} | 检测后端：{detector.backend}{save_msg}"
     if overwritten:
         detail += "（已覆盖同名旧记录）"
-    # 姓名含特殊字符时，文件会被改名保存；提醒可能与其他学生撞名（覆盖）
+    # 姓名含特殊字符时，文件会被改名保存；提示实际文件名，便于排查
     if sanitize_filename(name) != name:
-        detail += (f"\n⚠️ 姓名含特殊字符，特征文件将保存为「{sanitize_filename(name)}.npy」；"
-                   f"若已有同名文件会被覆盖，建议改用简短姓名")
+        detail += (f"\n⚠️ 姓名含特殊字符，特征文件保存为「{sanitize_filename(name)}.npy」；"
+                   f"报告与名单中仍按原名显示")
     return True, detail
 
 

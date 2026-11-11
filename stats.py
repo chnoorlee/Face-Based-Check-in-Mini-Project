@@ -31,6 +31,7 @@ except Exception:
     pass
 
 from config import ATTENDANCE_DIR  # noqa: E402
+from utils.imutils import csv_safe  # noqa: E402
 from utils.roster import Roster  # noqa: E402
 from utils.storage import is_late  # noqa: E402
 
@@ -135,7 +136,8 @@ def write_stats_csv(rows, out_path):
         writer = csv.writer(f)
         writer.writerow(["学生姓名", "应到次数", "实到次数", "迟到次数", "请假次数", "缺勤次数", "出勤率"])
         for r in rows:
-            writer.writerow([r["姓名"], r["应到"], r["实到"], r["迟到"], r["请假"], r["缺勤"], r["出勤率"]])
+            writer.writerow([csv_safe(r["姓名"]), r["应到"], r["实到"], r["迟到"],
+                             r["请假"], r["缺勤"], r["出勤率"]])
     return out_path
 
 

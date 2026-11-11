@@ -54,6 +54,7 @@ STATUS_TEXT = {
     "cooldown": "冷却中",
     "checked_in": "已签到",
     "unknown": "未知人员",
+    "error": "写入失败",
 }
 
 
@@ -88,6 +89,7 @@ class CheckinEngine:
         self.last_checkin = {}                        # 姓名 -> 最近签到时刻（冷却判断用）
         self.new_today = []                           # 本次运行新签到的名单（用于汇总）
         self._last_unknown_log = 0.0
+        self._write_errors = set()                    # 已提示过的写入失败学生（避免刷屏）
 
     def process_frame(self, frame):
         """处理一帧画面。返回 (识别结果列表, 事件消息列表)。"""
@@ -114,12 +116,21 @@ class CheckinEngine:
                     status = "checked_in"
             else:
                 # 第一次识别到该学生 -> 自动完成签到
-                row = self.recorder.record(name)
-                self.last_checkin[name] = time.monotonic()
-                self.checked_today.add(name)
-                self.new_today.append(name)
-                status = "new"
-                events.append(f"✅ [签到成功] {name}（{row['签到时间']}）")
+                try:
+                    row = self.recorder.record(name)
+                except OSError as exc:
+                    # 磁盘满 / 文件被 Excel 占用 / 无写权限：提示但不中断整场签到
+                    status = "error"
+                    if name not in self._write_errors:
+                        self._write_errors.add(name)
+                        events.append(f"❌ {name} 签到写入失败：{exc}")
+                        events.append("   请检查签到 CSV 是否被 Excel 打开、磁盘是否已满")
+                else:
+                    self.last_checkin[name] = time.monotonic()
+                    self.checked_today.add(name)
+                    self.new_today.append(name)
+                    status = "new"
+                    events.append(f"✅ [签到成功] {name}（{row['签到时间']}）")
             detections.append(Detection(box=box, name=name, distance=dist,
                                         status=status, cooldown_left=cooldown_left))
         return detections, events
@@ -179,6 +190,10 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE,
     if late_after is None:
         late_after = config_late_after()
     engine = CheckinEngine(detector, embedder, database, recorder, tolerance=tolerance)
+    if recorder.last_read_error:
+        print(f"⚠️ 今日签到记录读取失败（{recorder.last_read_error}）")
+        print("   为免重复签到，请先关闭占用该文件的程序（如 Excel）后重新运行")
+        return 1
     print(f"今日已签到：{len(engine.checked_today)} 人；应到：{len(roster)} 人"
           f"（已到 {roster.progress_text(engine.checked_today)}）")
     if roster.on_leave():
@@ -186,7 +201,14 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE,
     print(f"冷却时间：{engine.cooldown} 秒；识别阈值：{engine.tolerance}"
           + (f"；迟到线：{late_after:%H:%M}" if late_after else ""))
 
-    cap = cv2.VideoCapture(source if source is not None else CAMERA_INDEX)
+    camera_source = source if source is not None else CAMERA_INDEX
+    try:
+        cap = cv2.VideoCapture(camera_source)
+    except (cv2.error, TypeError) as exc:
+        # 例如 config.CAMERA_INDEX 被写成 0.5 之类的非整数
+        print(f"❌ 摄像头参数不合法（{camera_source!r}）：{exc}")
+        print("   请在 config.py 中把 CAMERA_INDEX 设为整数（0、1……）")
+        return 1
     if not cap.isOpened():
         print("❌ 无法打开摄像头。请检查：")
         print("   1) 摄像头是否被其他程序（如腾讯会议）占用")
@@ -272,7 +294,10 @@ def run_console(source=None, show_window=SHOW_WINDOW, tolerance=MATCH_TOLERANCE,
         print(f"📝 请假（{len(on_leave)}）：{'、'.join(on_leave)}")
     print(f"❌ 未到（{len(absent)}）：{'、'.join(absent) or '无'}")
     print(f"签到明细：{recorder.path}")
-    print(f"出勤报告：{report_path}")
+    if report_path is None:
+        print("⚠️ 签到记录读取失败，本次未生成出勤报告（原报告保持不变）")
+    else:
+        print(f"出勤报告：{report_path}")
     print(f"平均处理速度：{frames / max(elapsed, 1e-6):.1f} 帧/秒")
     return 0
 
@@ -309,7 +334,7 @@ def main():  # pragma: no cover - 命令行入口（手工实测覆盖）
     if args.roster:
         try:
             roster = Roster.from_file(args.roster, leave=args.leave)
-        except (FileNotFoundError, ValueError) as exc:
+        except (FileNotFoundError, ValueError, OSError) as exc:
             print("❌ 读取名单失败：", exc)
             return 1
         if not len(roster):
@@ -327,6 +352,11 @@ def main():  # pragma: no cover - 命令行入口（手工实测覆盖）
     if roster is None and args.leave:
         from utils.storage import FeatureDatabase as _DB
         roster = Roster.from_database(_DB().load_all(), leave=args.leave)
+
+    if args.leave and roster is not None:
+        ignored = [n for n in args.leave if n not in roster.leave]
+        if ignored:
+            print(f"⚠️ 以下请假人员不在应到名单中，已忽略：{'、'.join(ignored)}")
 
     return run_console(source=source, show_window=not args.no_window,
                        tolerance=args.tolerance, roster=roster,

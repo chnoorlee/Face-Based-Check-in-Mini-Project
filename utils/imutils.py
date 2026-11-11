@@ -19,6 +19,18 @@ _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL"} \
     | {f"LPT{i}" for i in range(1, 10)}
 
 
+def csv_safe(value) -> str:
+    """把单元格内容转为 Excel 安全的文本。
+
+    以 = + - @ 开头的文本会被 Excel 当作公式执行（CSV 公式注入 / DDE），
+    这里统一在前面加一个单引号，使其始终按文本显示。
+    """
+    text = "" if value is None else str(value)
+    if text[:1] in ("=", "+", "-", "@"):
+        return "'" + text
+    return text
+
+
 def sanitize_filename(name: str) -> str:
     """把学生姓名转换为安全的文件名。
 
@@ -40,11 +52,11 @@ def ensure_dirs(*dirs) -> None:
         Path(d).mkdir(parents=True, exist_ok=True)
 
 
-def imread_unicode(path: str):
+def imread_unicode(path):
     """读取图片，支持包含中文的路径。文件不存在或读取失败返回 None。"""
     try:
-        data = np.fromfile(path, dtype=np.uint8)
-    except OSError:   # 文件不存在、路径非法等
+        data = np.fromfile(str(path), dtype=np.uint8)
+    except (OSError, TypeError):   # 文件不存在、路径为 None/非法等
         return None
     if data.size == 0:
         return None

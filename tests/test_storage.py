@@ -32,17 +32,43 @@ class TestFeatureDatabase:
         assert db.exists("李四")
         assert not db.exists("王五")
 
-    def test_illegal_characters_in_name_are_sanitized(self, tmp_path):
+    def test_illegal_characters_are_kept_as_display_name(self, tmp_path):
+        # 文件名做净化，但显示姓名保持原样（报告里仍是原名）
         db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
-        db.save('张/三:*?', np.zeros(128), _make_image())
-        assert len(db.names()) == 1
-        assert "/" not in db.names()[0] and ":" not in db.names()[0]
+        db.save("张/三:*?", np.zeros(128), _make_image())
+        assert db.names() == ["张/三:*?"]
+        from utils.imutils import sanitize_filename
+        assert (tmp_path / "emb" / f"{sanitize_filename('张/三:*?')}.npy").exists()
 
-    def test_leading_formula_chars_are_sanitized(self, tmp_path):
-        # 防止 CSV 公式注入：以 = 开头的姓名应被改写
+    def test_leading_formula_chars_kept_in_display_name(self, tmp_path):
+        # 文件名不能以 = 开头，但显示姓名保留（写 CSV 时另行转义）
         db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
         db.save("=cmd", np.zeros(128), _make_image())
-        assert db.names()[0] == "_cmd"
+        assert db.names() == ["=cmd"]
+        assert (tmp_path / "emb" / "_cmd.npy").exists()
+
+    def test_colliding_names_are_rejected(self, tmp_path):
+        # "张 三" 与 "张_三" 会写成同一个文件：第二个必须被拒绝，不能静默覆盖
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        ok1, _ = db.save("张 三", np.ones(128), _make_image())
+        ok2, msg = db.save("张_三", np.zeros(128), _make_image())
+        assert ok1 is True
+        assert ok2 is False and "冲突" in msg
+        assert db.names() == ["张 三"]          # 第一个学生未被覆盖
+        np.testing.assert_array_equal(db.load_all()["张 三"], np.ones(128))
+
+    def test_corrupt_npy_is_skipped_not_fatal(self, tmp_path):
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张三", np.ones(128), _make_image())
+        (tmp_path / "emb" / "坏文件.npy").write_bytes(b"not a numpy file")
+        loaded = db.load_all()
+        assert set(loaded) == {"张三"}          # 坏文件被跳过，正常学生仍在
+
+    def test_multi_dim_vector_is_skipped(self, tmp_path):
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张三", np.ones(128), _make_image())
+        np.save(tmp_path / "emb" / "二维.npy", np.ones((4, 4)))
+        assert set(db.load_all()) == {"张三"}
 
     def test_overwrite_same_name(self, tmp_path):
         db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
@@ -156,6 +182,40 @@ class TestAttendanceRecorder:
         text = path.read_text(encoding="utf-8-sig")
         assert "张三,已到,2026-11-11 08:05:00" in text
         assert "李四,迟到,2026-11-11 08:30:00" in text
+
+    def test_zero_byte_csv_gets_header_on_first_record(self, tmp_path):
+        # 上次崩溃留下的空文件：第一条记录必须补写表头
+        rec = AttendanceRecorder(tmp_path)
+        rec.path.write_bytes(b"")
+        rec.record("张三")
+        lines = rec.path.read_text(encoding="utf-8-sig").strip().splitlines()
+        assert lines[0] == "学生姓名,签到时间,是否签到成功"
+        assert len(lines) == 2
+        assert rec.load_checked_names() == {"张三"}
+
+    def test_missing_trailing_newline_is_repaired(self, tmp_path):
+        # 上一行缺少换行时，新记录不能与其粘成坏行
+        rec = AttendanceRecorder(tmp_path)
+        rec.path.write_text("学生姓名,签到时间,是否签到成功\n甲同学,2026-11-11 08:0",
+                            encoding="utf-8-sig")
+        rec.record("乙同学")
+        assert rec.load_checked_names() == {"乙同学"}
+
+    def test_read_error_is_reported_and_blocks_report(self, tmp_path):
+        rec = AttendanceRecorder(tmp_path)
+        rec.path.write_bytes(b"\xff\xfe\x00garbage\x9c")   # 非 UTF-8 内容
+        assert rec.load_records() == {}
+        assert rec.last_read_error is not None
+        # 读取失败时不能覆盖已有报告（返回 None）
+        assert rec.write_summary(["张三"], set()) is None
+
+    def test_report_escapes_formula_names(self, tmp_path):
+        rec = AttendanceRecorder(tmp_path)
+        rec.record("张三")
+        path = rec.write_summary(["张三", '=HYPERLINK("http://evil","x")'], {"张三"})
+        text = path.read_text(encoding="utf-8-sig")
+        assert "'=HYPERLINK" in text      # 公式被转义为文本
+        assert "\n=HYPERLINK" not in text
 
     def test_is_late_helper(self):
         from datetime import time

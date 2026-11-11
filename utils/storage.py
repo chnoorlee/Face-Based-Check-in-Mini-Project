@@ -1,19 +1,23 @@
 # -*- coding: utf-8 -*-
 """
 本地存储模块
-- FeatureDatabase：人脸特征库（每个学生一个 .npy 特征文件 + 一张人脸照片）
-- AttendanceRecorder：签到记录（每天一个 CSV 文件，含 学生姓名/签到时间/是否签到成功 三列）
-- find_best_match：特征比对核心函数（找特征库中距离最近的匹配）
+- FeatureDatabase：人脸特征库（每个学生一个 .npy 特征文件 + 一张人脸照片 + 姓名索引）
+- AttendanceRecorder：签到记录（按天/节次一个 CSV，含 学生姓名/签到时间/是否签到成功）
+- write_summary：四态出勤报告（已到/迟到/请假/缺勤）
+- find_best_match：特征比对核心函数
 """
 import csv
+import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
 from config import ATTENDANCE_DIR, EMBEDDINGS_DIR, FACES_DIR
-from utils.imutils import ensure_dirs, imwrite_unicode, sanitize_filename
+from utils.imutils import (csv_safe, ensure_dirs, imwrite_unicode,
+                           sanitize_filename)
 
 logger = logging.getLogger(__name__)
 
@@ -23,70 +27,178 @@ def find_best_match(embedding, database, tolerance):
 
     database: {姓名: 特征向量}
     返回 (姓名, 距离)；距离超过 tolerance 视为未匹配，返回 (None, 距离)。
-    特征库为空时返回 (None, None)。
+    特征库为空、或特征维度不一致时返回 (None, None)。
     """
     if not database:
         return None, None
+    probe = np.asarray(embedding).ravel()
     best_name, best_dist = None, float("inf")
     for name, vec in database.items():
-        dist = float(np.linalg.norm(np.asarray(embedding) - np.asarray(vec)))
+        vec = np.asarray(vec).ravel()
+        if vec.shape != probe.shape:      # 维度异常的历史特征，跳过而不是崩溃
+            continue
+        dist = float(np.linalg.norm(probe - vec))
         if dist < best_dist:
             best_name, best_dist = name, dist
+    if best_name is None:
+        return None, None
     if best_dist <= tolerance:
         return best_name, best_dist
     return None, best_dist
 
 
 class FeatureDatabase:
-    """人脸特征库：data/embeddings/ 下每个学生一个 .npy 文件，文件名即学生姓名。
+    """人脸特征库。
 
-    同名注册会覆盖旧记录（课程项目规模下姓名即唯一标识）。
+    每个学生：
+      - data/embeddings/姓名.npy   128 维特征向量
+      - data/faces/姓名.jpg        注册时的人脸照片
+      - data/embeddings/_index.json 记录「显示姓名 → 文件名」映射与注册时间
+
+    索引文件解决了两个问题：
+      1. 姓名含特殊字符时会被改写成文件名（"张 三" -> "张_三"），
+         索引保留原始姓名，报告与名单比对仍用原名；
+      2. 两个不同姓名若改写成同一个文件名，注册时会被拒绝，避免静默覆盖掉另一个学生。
     """
+
+    INDEX_NAME = "_index.json"
 
     def __init__(self, embeddings_dir=None, faces_dir=None):
         self.embeddings_dir = Path(embeddings_dir) if embeddings_dir else EMBEDDINGS_DIR
         self.faces_dir = Path(faces_dir) if faces_dir else FACES_DIR
         ensure_dirs(self.embeddings_dir, self.faces_dir)
+        self._index_path = self.embeddings_dir / self.INDEX_NAME
 
-    def save(self, name, embedding, face_image) -> None:
-        """保存特征向量（.npy）与人脸照片（.jpg），同名自动覆盖"""
+    # ---------- 索引 ----------
+    def _load_index(self) -> dict:
+        try:
+            if self._index_path.exists():
+                data = json.loads(self._index_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {k: v for k, v in data.items() if isinstance(v, dict)}
+                logger.warning("特征库索引格式异常，将按文件名重建：%s", self._index_path)
+        except (OSError, ValueError) as exc:
+            logger.warning("特征库索引读取失败，将按文件名重建：%s", exc)
+        return {}
+
+    def _write_index(self, index: dict) -> None:
+        tmp = self._index_path.with_name(self.INDEX_NAME + ".tmp")
+        tmp.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, self._index_path)
+
+    @staticmethod
+    def _stem_owner(stem, index):
+        for name, meta in index.items():
+            if meta.get("stem") == stem:
+                return name
+        return None
+
+    # ---------- 读写 ----------
+    def save(self, name, embedding, face_image):
+        """保存特征向量与人脸照片。返回 (是否成功, 提示信息)。"""
         fname = sanitize_filename(name)
-        np.save(self.embeddings_dir / f"{fname}.npy", embedding)
-        imwrite_unicode(self.faces_dir / f"{fname}.jpg", face_image)
+        index = self._load_index()
+
+        owner = self._stem_owner(fname, index)
+        if owner is not None and owner != name:
+            return False, (f"姓名冲突：「{name}」与已注册的「{owner}」会写入同一个文件 "
+                           f"{fname}.npy，为避免覆盖请不要使用仅特殊字符不同的姓名")
+
+        vec_path = self.embeddings_dir / f"{fname}.npy"
+        tmp_path = self.embeddings_dir / f".{fname}.tmp.npy"
+        try:
+            np.save(tmp_path, np.asarray(embedding))     # 先写临时文件，再原子替换
+            os.replace(tmp_path, vec_path)
+        except OSError as exc:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+            return False, f"保存人脸特征失败：{exc}"
+
+        photo_ok = imwrite_unicode(self.faces_dir / f"{fname}.jpg", face_image)
+        if not photo_ok:
+            logger.warning("人脸照片保存失败（特征已入库）：%s", name)
+
+        index[name] = {"stem": fname,
+                       "registered_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        try:
+            self._write_index(index)
+        except OSError as exc:
+            logger.warning("更新特征库索引失败：%s", exc)
+
+        return True, "" if photo_ok else "（人脸照片保存失败，特征已入库）"
 
     def load_all(self) -> dict:
-        """加载全部已注册学生：{姓名: 128 维特征向量}"""
+        """加载全部已注册学生：{显示姓名: 特征向量}。
+
+        单个特征文件损坏时跳过并记录警告，不影响其他学生使用。
+        """
+        index = self._load_index()
+        stem_to_name = {meta.get("stem"): name for name, meta in index.items() if meta.get("stem")}
         database = {}
         for p in sorted(self.embeddings_dir.glob("*.npy")):
-            database[p.stem] = np.load(p)
+            name = stem_to_name.get(p.stem, p.stem)
+            try:
+                vec = np.asarray(np.load(p))
+            except (OSError, ValueError) as exc:
+                logger.warning("跳过无法读取的特征文件 %s：%s", p.name, exc)
+                continue
+            if vec.ndim != 1 or vec.size == 0:
+                logger.warning("跳过维度异常的特征文件 %s（shape=%s）", p.name, vec.shape)
+                continue
+            database[name] = vec
         return database
 
     def exists(self, name) -> bool:
         """学生是否已注册"""
+        if name in self._load_index():
+            return True
         return (self.embeddings_dir / f"{sanitize_filename(name)}.npy").exists()
 
     def names(self) -> list:
-        """已注册学生姓名列表"""
-        return [p.stem for p in sorted(self.embeddings_dir.glob("*.npy"))]
+        """已注册学生姓名列表（显示姓名）"""
+        index = self._load_index()
+        stem_to_name = {meta.get("stem"): name for name, meta in index.items() if meta.get("stem")}
+        return [stem_to_name.get(p.stem, p.stem) for p in sorted(self.embeddings_dir.glob("*.npy"))]
 
     def delete(self, name) -> bool:
-        """删除学生（特征向量 + 人脸照片）。返回是否有记录被删除。"""
-        fname = sanitize_filename(name)
+        """删除学生（特征向量 + 人脸照片 + 索引）。返回是否有记录被删除。"""
+        index = self._load_index()
+        stem = index.get(name, {}).get("stem") or sanitize_filename(name)
         removed = False
-        for p in (self.embeddings_dir / f"{fname}.npy", self.faces_dir / f"{fname}.jpg"):
-            if p.exists():
-                p.unlink()
-                removed = True
+        for p in (self.embeddings_dir / f"{stem}.npy", self.faces_dir / f"{stem}.jpg"):
+            try:
+                if p.exists():
+                    p.unlink()
+                    removed = True
+            except OSError as exc:
+                logger.warning("删除文件失败 %s：%s", p, exc)
+        if name in index:
+            index.pop(name, None)
+            try:
+                self._write_index(index)
+            except OSError as exc:
+                logger.warning("更新特征库索引失败：%s", exc)
+            removed = True
         return removed
 
     def details(self) -> list:
-        """已注册学生详情列表：[{name, registered_at}]（注册时间取特征文件的修改时间）"""
+        """已注册学生详情：[{name, registered_at}]"""
+        index = self._load_index()
         infos = []
         for p in sorted(self.embeddings_dir.glob("*.npy")):
-            infos.append({
-                "name": p.stem,
-                "registered_at": datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-            })
+            meta = None
+            for name, m in index.items():
+                if m.get("stem") == p.stem:
+                    meta = (name, m)
+                    break
+            if meta is None:
+                meta = (p.stem, {})
+            registered = meta[1].get("registered_at") or \
+                datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            infos.append({"name": meta[0], "registered_at": registered})
         return infos
 
 
@@ -109,23 +221,28 @@ class AttendanceRecorder:
         self.session = (session or "").strip() or None
         self._suffix = f"_{sanitize_filename(self.session)}" if self.session else ""
         self.path = self.attendance_dir / f"attendance_{self.date}{self._suffix}.csv"
+        self.last_read_error = None   # 最近一次读取失败原因（None 表示读取正常）
 
     def load_checked_names(self) -> set:
-        """读取今天已成功签到的学生名单（用于每日防重复签到）。
-
-        CSV 损坏或编码异常时记录警告并按空记录处理，保证签到流程不中断。
-        """
+        """读取今天已成功签到的学生名单（用于每日防重复签到）。"""
         return set(self.load_records().keys())
 
     def load_records(self) -> dict:
-        """读取今天已成功签到的明细：{姓名: 签到时间}。"""
+        """读取今天已成功签到的明细：{姓名: 签到时间}。
+
+        文件不存在视为「今天还没人签到」；文件存在但读取失败时
+        记录到 self.last_read_error 并返回空字典（调用方据此中止生成报告，
+        避免把所有人错写成缺勤）。
+        """
+        self.last_read_error = None
         if not self.path.exists():
             return {}
         try:
             with open(self.path, encoding="utf-8-sig", newline="") as f:
                 rows = list(csv.reader(f))
         except (OSError, csv.Error, UnicodeDecodeError) as exc:
-            logger.warning("读取签到记录失败（%s），按空记录处理：%s", self.path, exc)
+            self.last_read_error = str(exc)
+            logger.warning("读取签到记录失败（%s）：%s", self.path, exc)
             return {}
         records = {}
         for row in rows[1:]:
@@ -133,28 +250,33 @@ class AttendanceRecorder:
                 records.setdefault(row[0], row[1])
         return records
 
-    def write_summary(self, roster_names, checked_names, leave_names=(), late_after=None) -> Path:
+    def write_summary(self, roster_names, checked_names, leave_names=(), late_after=None):
         """写出勤报告 CSV：应到名单中每人一行，状态为 已到 / 迟到 / 请假 / 缺勤。
 
-        文件名：attendance_YYYY-MM-DD[_节次]_report.csv（与明细表同目录）
-        列为：学生姓名, 状态, 签到时间
-        late_after：datetime.time 或 None。签到时间晚于该时刻记为「迟到」。
+        文件名：attendance_YYYY-MM-DD[_节次]_report.csv
+        返回报告路径；若签到记录读取失败则返回 None（不覆盖已有报告）。
         """
         records = self.load_records()
+        if self.last_read_error:
+            logger.warning("签到记录读取失败，已跳过生成出勤报告：%s", self.last_read_error)
+            return None
+
         leave = set(leave_names or ())
-        path = self.attendance_dir / f"attendance_{self.date}{self._suffix}_report.csv"
-        with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        path = self.report_path()
+        tmp = path.with_name(path.stem + ".tmp" + path.suffix)
+        with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["学生姓名", "状态", "签到时间"])
             for name in roster_names:
                 time_str = records.get(name, "")
                 if name in leave:
-                    writer.writerow([name, "请假", ""])
+                    writer.writerow([csv_safe(name), "请假", ""])
                 elif name in checked_names:
                     status = "迟到" if is_late(time_str, late_after) else "已到"
-                    writer.writerow([name, status, time_str])
+                    writer.writerow([csv_safe(name), status, csv_safe(time_str)])
                 else:
-                    writer.writerow([name, "缺勤", ""])
+                    writer.writerow([csv_safe(name), "缺勤", ""])
+        os.replace(tmp, path)   # 原子替换，避免中途崩溃截断上一份报告
         return path
 
     def report_path(self) -> Path:
@@ -162,16 +284,20 @@ class AttendanceRecorder:
         return self.attendance_dir / f"attendance_{self.date}{self._suffix}_report.csv"
 
     def record(self, name, success=True) -> dict:
-        """追加一条签到记录，返回写入的行内容"""
-        # 防 CSV 公式注入：以 = + - @ 开头的姓名会被 Excel 当作公式执行，
-        # 统一改写开头字符（与 imutils.sanitize_filename 规则一致，幂等）
-        safe_name = name
-        while safe_name and safe_name[0] in "=+-@":
-            safe_name = "_" + safe_name[1:]
+        """追加一条签到记录，返回写入的行内容。写入失败会抛出 OSError。"""
+        safe_name = csv_safe(name)
         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         row = [safe_name, time_str, "是" if success else "否"]
-        new_file = not self.path.exists()
+
+        # 文件不存在、或存在但为空（上次崩溃留下）都视为新文件，需要补表头
+        new_file = (not self.path.exists()) or self.path.stat().st_size == 0
         with open(self.path, "a", encoding="utf-8-sig", newline="") as f:
+            # 上一行若因崩溃缺少换行，先补一个，避免两条记录粘连成坏行
+            if not new_file:
+                with open(self.path, "rb") as rf:
+                    rf.seek(-1, os.SEEK_END)
+                    if rf.read(1) not in (b"\n", b"\r"):
+                        f.write("\n")
             writer = csv.writer(f)
             if new_file:
                 writer.writerow(self.CSV_HEADER)
