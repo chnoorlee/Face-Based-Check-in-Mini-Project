@@ -23,3 +23,8 @@ models/*
 # 临时文件
 *.mp4
 *.tmp
+
+# 测试覆盖率数据
+.coverage
+coverage.xml
+htmlcov/
