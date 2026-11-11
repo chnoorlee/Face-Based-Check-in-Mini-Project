@@ -110,16 +110,21 @@ def check_camera():
         import cv2
     except ImportError:
         return "fail", "opencv 未安装", "pip install -r requirements.txt"
+    from utils.camera import diagnose_frame, warmup
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
         cap.release()
         return "fail", f"无法打开摄像头 {CAMERA_INDEX}", \
             "检查摄像头占用/权限，或在 config.py 修改 CAMERA_INDEX（外接摄像头试 1）"
-    ok, frame = cap.read()
+    # 按真实时间预热（实测自动曝光需 1~2 秒），再判断画面是否可用
+    _, frame = warmup(cap)
     cap.release()
-    if not ok or frame is None:
+    if frame is None:
         return "warn", "摄像头已打开但读不到画面", "稍后重试，或检查摄像头是否被其他程序占用"
-    return True, f"摄像头 {CAMERA_INDEX} 可用（{frame.shape[1]}x{frame.shape[0]}）", ""
+    healthy, message = diagnose_frame(frame)
+    if not healthy:
+        return "fail", f"{frame.shape[1]}x{frame.shape[0]}，但{message}", "按上面的提示处理后再运行"
+    return True, f"摄像头 {CAMERA_INDEX} 可用（{frame.shape[1]}x{frame.shape[0]}，{message}）", ""
 
 
 def check_font():

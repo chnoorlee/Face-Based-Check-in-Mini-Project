@@ -33,7 +33,8 @@ except ImportError:
     raise SystemExit(1)
 
 from checkin import CheckinEngine  # noqa: E402
-from config import CAMERA_INDEX, FACES_DIR  # noqa: E402
+from config import (CAMERA_INDEX, FACES_DIR, PROCESS_EVERY_N_FRAMES,  # noqa: E402
+                    PROCESS_MAX_WIDTH)
 from register import register_face  # noqa: E402
 from utils.drawing import (RosterPanel, attach_roster_panel,  # noqa: E402
                            draw_detections)
@@ -109,6 +110,8 @@ class CheckinWindow(tk.Toplevel):
         self.running = False
         self.cap = None
         self.engine = None
+        self._frame_no = 0
+        self._last_detections = []
 
         self.video_label = ttk.Label(self)
         self.video_label.pack(padx=10, pady=6, expand=True)
@@ -170,6 +173,14 @@ class CheckinWindow(tk.Toplevel):
             if not cap.isOpened():
                 self._fail("无法打开摄像头，请检查设备或修改 config.py 中的 CAMERA_INDEX")
                 return
+            # 按时间预热，并检查画面是否可用（挡板关闭/过暗时给出明确提示）
+            from utils.camera import diagnose_frame, warmup
+            _, probe = warmup(cap)
+            if probe is not None:
+                healthy, message = diagnose_frame(probe)
+                if not healthy:
+                    self._log(f"⚠️ 摄像头异常：{message}")
+                    messagebox.showwarning("摄像头画面异常", message)
             self.engine, self.cap, self.running = engine, cap, True
             self.roster = Roster.from_database(database)   # 应到名单 = 全部已注册学生
             self.panel = RosterPanel(faces_dir=FACES_DIR)
@@ -203,7 +214,18 @@ class CheckinWindow(tk.Toplevel):
         if not ok:
             self.info_var.set("读取摄像头画面失败")
             return
-        detections, events = self.engine.process_frame(frame)
+        if PROCESS_MAX_WIDTH and frame.shape[1] > PROCESS_MAX_WIDTH:
+            ratio = PROCESS_MAX_WIDTH / frame.shape[1]
+            frame = cv2.resize(frame, (PROCESS_MAX_WIDTH, int(frame.shape[0] * ratio)),
+                               interpolation=cv2.INTER_AREA)
+        # 跳帧：只每 N 帧识别一次，其余帧沿用上次结果，显著降低 CPU 占用
+        self._frame_no += 1
+        skip = max(1, int(PROCESS_EVERY_N_FRAMES or 1))
+        if self._frame_no % skip == 0:
+            detections, events = self.engine.process_frame(frame)
+            self._last_detections = detections
+        else:
+            detections, events = self._last_detections, []
         for event in events:
             self._log(event)
         draw_detections(frame, detections)
