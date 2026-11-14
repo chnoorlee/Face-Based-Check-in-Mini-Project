@@ -83,6 +83,12 @@ def validate_config():
         warnings.append(f"DETECT_CONFIDENCE={DETECT_CONFIDENCE} 必须在 (0, 1] 范围内（置信度概率）")
     if not isinstance(CAMERA_INDEX, int) or CAMERA_INDEX < -1:
         warnings.append(f"CAMERA_INDEX={CAMERA_INDEX!r} 应为非负整数（外接摄像头一般用 0 或 1）")
+    if not isinstance(PROCESS_MAX_WIDTH, int) or PROCESS_MAX_WIDTH < 0:
+        warnings.append(f"PROCESS_MAX_WIDTH={PROCESS_MAX_WIDTH!r} 应为 0（不缩放）或正整数")
+    if not isinstance(PROCESS_EVERY_N_FRAMES, int) or PROCESS_EVERY_N_FRAMES < 1:
+        warnings.append(f"PROCESS_EVERY_N_FRAMES={PROCESS_EVERY_N_FRAMES!r} 必须为 ≥1 的整数")
+    if not isinstance(DETECT_IMG_SIZE, int) or DETECT_IMG_SIZE < 160:
+        warnings.append(f"DETECT_IMG_SIZE={DETECT_IMG_SIZE!r} 过小（建议 320~640）")
     if LATE_GRACE_MINUTES < 0:
         warnings.append(f"LATE_GRACE_MINUTES={LATE_GRACE_MINUTES} 不能为负数")
     try:

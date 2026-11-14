@@ -57,6 +57,41 @@ class TestFeatureDatabase:
         assert db.names() == ["张 三"]          # 第一个学生未被覆盖
         np.testing.assert_array_equal(db.load_all()["张 三"].ravel(), np.ones(128))
 
+    def test_replace_removes_stale_photos(self, tmp_path):
+        # --replace 重建后，旧的多张照片不能残留
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张三", np.ones(128), _make_image())
+        db.save("张三", np.zeros(128), _make_image())
+        assert (db.faces_dir / "张三_2.jpg").exists()
+        db.save("张三", np.full(128, 2.0), _make_image(), append=False)
+        assert db.load_all()["张三"].shape == (1, 128)
+        assert (db.faces_dir / "张三.jpg").exists()
+        assert not (db.faces_dir / "张三_2.jpg").exists()
+
+    def test_delete_removes_all_photos(self, tmp_path):
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张三", np.ones(128), _make_image())
+        db.save("张三", np.zeros(128), _make_image())
+        assert db.delete("张三")
+        assert list(db.faces_dir.glob("张三*.jpg")) == []
+
+    def test_delete_does_not_touch_similar_names(self, tmp_path):
+        # 「张」的照片清理不能误删「张三」的照片（前缀匹配陷阱）
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张", np.ones(128), _make_image())
+        db.save("张三", np.zeros(128), _make_image())
+        assert db.delete("张")
+        assert (db.faces_dir / "张三.jpg").exists()
+        assert db.names() == ["张三"]
+
+    def test_tmp_file_is_not_loaded_as_student(self, tmp_path):
+        # 写入中断残留的临时文件不能被当成学生加载
+        db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
+        db.save("张三", np.ones(128), _make_image())
+        (tmp_path / "emb" / ".李四.tmp").write_bytes(b"partial")
+        assert db.names() == ["张三"]
+        assert set(db.load_all()) == {"张三"}
+
     def test_corrupt_npy_is_skipped_not_fatal(self, tmp_path):
         db = FeatureDatabase(tmp_path / "emb", tmp_path / "faces")
         db.save("张三", np.ones(128), _make_image())
@@ -240,6 +275,15 @@ class TestAttendanceRecorder:
         assert rec.last_read_error is not None
         # 读取失败时不能覆盖已有报告（返回 None）
         assert rec.write_summary(["张三"], set()) is None
+
+    def test_formula_name_roundtrip_keeps_original_name(self, tmp_path):
+        # 姓名以 = 开头时写入 CSV 会被转义，读回来必须还原，否则永远判缺勤、去重失效
+        rec = AttendanceRecorder(tmp_path)
+        rec.record("=命令")
+        assert rec.load_checked_names() == {"=命令"}
+        assert rec.load_records()["=命令"].startswith("20")
+        # 文件里仍然是被转义的安全形式
+        assert "'=命令" in rec.path.read_text(encoding="utf-8-sig")
 
     def test_report_escapes_formula_names(self, tmp_path):
         rec = AttendanceRecorder(tmp_path)

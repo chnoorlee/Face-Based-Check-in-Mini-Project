@@ -118,12 +118,17 @@ def cmd_report():
         return
     recorder = AttendanceRecorder()
     checked = recorder.load_checked_names()
+    if recorder.last_read_error:
+        print(f"❌ 签到记录读取失败：{recorder.last_read_error}")
+        print("   请先关闭占用签到 CSV 的程序（如 Excel）后重试\n")
+        return
     report = recorder.write_summary(roster.names, checked)
     present, absent = roster.present(checked), roster.absent(checked)
     print(f"\n出勤：应到 {len(roster)} 人 | 实到 {len(present)} 人 | 缺勤 {len(absent)} 人")
     print(f"✅ 已到（{len(present)}）：{'、'.join(present) or '无'}")
     print(f"❌ 未到（{len(absent)}）：{'、'.join(absent) or '无'}")
-    print(f"报告文件：{report}\n")
+    print(f"报告文件：{report}" if report else "⚠️ 未生成出勤报告（签到记录读取失败）")
+    print()
 
 
 def cmd_stats():

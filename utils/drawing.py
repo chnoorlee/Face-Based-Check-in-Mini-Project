@@ -88,8 +88,9 @@ class RosterPanel:
             return self._thumbs[name]
         img = None
         if self.faces_dir is not None:
+            # 照片按序号保存：姓名.jpg、姓名_2.jpg……（从 2 开始编号）
             for candidate in (f"{sanitize_filename(name)}.jpg",
-                              f"{sanitize_filename(name)}_1.jpg"):
+                              f"{sanitize_filename(name)}_2.jpg"):
                 path = self.faces_dir / candidate
                 if path.exists():
                     try:

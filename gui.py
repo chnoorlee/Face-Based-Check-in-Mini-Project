@@ -151,6 +151,7 @@ class CheckinWindow(tk.Toplevel):
 
     def _init(self):
         """初始化检测模型、特征库与摄像头（任何异常都要给出可见提示）"""
+        cap = None
         try:
             database = FeatureDatabase().load_all()
             if not database:
@@ -171,6 +172,8 @@ class CheckinWindow(tk.Toplevel):
                 self._fail(f"摄像头参数不合法（CAMERA_INDEX={CAMERA_INDEX!r}）：{exc}")
                 return
             if not cap.isOpened():
+                cap.release()
+                cap = None
                 self._fail("无法打开摄像头，请检查设备或修改 config.py 中的 CAMERA_INDEX")
                 return
             # 按时间预热，并检查画面是否可用（挡板关闭/过暗时给出明确提示）
@@ -187,6 +190,8 @@ class CheckinWindow(tk.Toplevel):
             self.info_var.set(f"检测后端：{detector.backend} | 应到 {len(self.roster)} 人"
                               f" | 已到 {self.roster.progress_text(engine.checked_today)}")
         except (RuntimeError, cv2.error, OSError) as exc:
+            if cap is not None:
+                cap.release()      # 失败时务必释放，否则摄像头会被一直占用
             self._fail(f"初始化失败：{exc}")
             return
         self._tick()
@@ -219,9 +224,10 @@ class CheckinWindow(tk.Toplevel):
             frame = cv2.resize(frame, (PROCESS_MAX_WIDTH, int(frame.shape[0] * ratio)),
                                interpolation=cv2.INTER_AREA)
         # 跳帧：只每 N 帧识别一次，其余帧沿用上次结果，显著降低 CPU 占用
-        self._frame_no += 1
         skip = max(1, int(PROCESS_EVERY_N_FRAMES or 1))
-        if self._frame_no % skip == 0:
+        process_now = self._frame_no % skip == 0      # 第 1 帧（_frame_no=0）必须处理
+        self._frame_no += 1
+        if process_now:
             detections, events = self.engine.process_frame(frame)
             self._last_detections = detections
         else:

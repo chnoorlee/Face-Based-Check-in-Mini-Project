@@ -31,7 +31,7 @@ except Exception:
     pass
 
 from config import ATTENDANCE_DIR  # noqa: E402
-from utils.imutils import csv_safe  # noqa: E402
+from utils.imutils import csv_safe, csv_unescape  # noqa: E402
 from utils.roster import Roster  # noqa: E402
 from utils.storage import is_late  # noqa: E402
 
@@ -69,7 +69,7 @@ def read_status_map(session, late_after=None):
             with open(report, encoding="utf-8-sig", newline="") as f:
                 for row in list(csv.reader(f))[1:]:
                     if len(row) >= 2 and row[1] in STATUSES:
-                        status[row[0]] = row[1]
+                        status[csv_unescape(row[0])] = row[1]
         except (OSError, csv.Error, UnicodeDecodeError):
             pass
     if not status:

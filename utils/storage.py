@@ -16,8 +16,8 @@ from pathlib import Path
 import numpy as np
 
 from config import ATTENDANCE_DIR, EMBEDDINGS_DIR, FACES_DIR
-from utils.imutils import (csv_safe, ensure_dirs, imwrite_unicode,
-                           sanitize_filename)
+from utils.imutils import (csv_safe, csv_unescape, ensure_dirs,
+                           imwrite_unicode, sanitize_filename)
 
 logger = logging.getLogger(__name__)
 
@@ -128,9 +128,11 @@ class FeatureDatabase:
         if stack.shape[0] > self.MAX_PHOTOS:
             stack = stack[-self.MAX_PHOTOS:]   # 超出上限时丢弃最旧的登记
 
-        tmp_path = self.embeddings_dir / f".{fname}.tmp.npy"
+        # 临时文件不能以 .npy 结尾：否则崩溃残留会被 load_all() 的 *.npy 当成一个学生加载
+        tmp_path = self.embeddings_dir / f".{fname}.tmp"
         try:
-            np.save(tmp_path, stack)          # 先写临时文件，再原子替换
+            with open(tmp_path, "wb") as fh:
+                np.save(fh, stack)            # 先写临时文件，再原子替换
             os.replace(tmp_path, vec_path)
         except OSError as exc:
             if tmp_path.exists():
@@ -141,6 +143,8 @@ class FeatureDatabase:
             return False, f"保存人脸特征失败：{exc}"
 
         # 照片按序号保存：姓名.jpg、姓名_2.jpg、姓名_3.jpg……
+        if not append:
+            self._remove_photos(fname, keep=None)      # 覆盖重建：先清掉旧照片
         photo_no = 1 if old is None else min(old.shape[0] + 1, self.MAX_PHOTOS)
         photo_name = f"{fname}.jpg" if photo_no == 1 else f"{fname}_{photo_no}.jpg"
         photo_ok = imwrite_unicode(self.faces_dir / photo_name, face_image)
@@ -197,12 +201,28 @@ class FeatureDatabase:
         stem_to_name = {meta.get("stem"): name for name, meta in index.items() if meta.get("stem")}
         return [stem_to_name.get(p.stem, p.stem) for p in sorted(self.embeddings_dir.glob("*.npy"))]
 
+    def _remove_photos(self, stem, keep=None):
+        """删除该学生的所有照片文件（stem.jpg、stem_2.jpg……），keep 指定保留的文件名。
+
+        注意必须精确匹配：用 "{stem}*.jpg" 会把「张」和「张三」的照片一起删掉。
+        """
+        targets = list(self.faces_dir.glob(f"{stem}.jpg"))
+        targets += list(self.faces_dir.glob(f"{stem}_[0-9]*.jpg"))
+        for p in targets:
+            if keep is not None and p.name == keep:
+                continue
+            try:
+                p.unlink()
+            except OSError as exc:
+                logger.warning("删除照片失败 %s：%s", p, exc)
+
     def delete(self, name) -> bool:
-        """删除学生（特征向量 + 人脸照片 + 索引）。返回是否有记录被删除。"""
+        """删除学生（特征向量 + 全部人脸照片 + 索引）。返回是否有记录被删除。"""
         index = self._load_index()
         stem = index.get(name, {}).get("stem") or sanitize_filename(name)
         removed = False
-        for p in (self.embeddings_dir / f"{stem}.npy", self.faces_dir / f"{stem}.jpg"):
+        self._remove_photos(stem)
+        for p in (self.embeddings_dir / f"{stem}.npy",):
             try:
                 if p.exists():
                     p.unlink()
@@ -286,7 +306,7 @@ class AttendanceRecorder:
         records = {}
         for row in rows[1:]:
             if len(row) >= 3 and row[2] == "是":
-                records.setdefault(row[0], row[1])
+                records.setdefault(csv_unescape(row[0]), row[1])
         return records
 
     def write_summary(self, roster_names, checked_names, leave_names=(), late_after=None):
@@ -302,7 +322,8 @@ class AttendanceRecorder:
 
         leave = set(leave_names or ())
         path = self.report_path()
-        tmp = path.with_name(path.stem + ".tmp" + path.suffix)
+        # 临时文件用 .tmp 结尾而非 .csv：否则崩溃残留会被统计脚本当成一次课
+        tmp = path.with_name(path.stem + ".tmp")
         with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["学生姓名", "状态", "签到时间"])

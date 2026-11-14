@@ -47,3 +47,18 @@ def test_validate_config_checks_start_time(monkeypatch):
 def test_validate_config_checks_negative_grace(monkeypatch):
     monkeypatch.setattr(config, "LATE_GRACE_MINUTES", -1)
     assert any("LATE_GRACE_MINUTES" in w for w in config.validate_config())
+
+
+def test_validate_config_checks_frame_skip(monkeypatch):
+    monkeypatch.setattr(config, "PROCESS_EVERY_N_FRAMES", 0)
+    assert any("PROCESS_EVERY_N_FRAMES" in w for w in config.validate_config())
+
+
+def test_validate_config_checks_process_width(monkeypatch):
+    monkeypatch.setattr(config, "PROCESS_MAX_WIDTH", -100)
+    assert any("PROCESS_MAX_WIDTH" in w for w in config.validate_config())
+
+
+def test_validate_config_checks_detect_size(monkeypatch):
+    monkeypatch.setattr(config, "DETECT_IMG_SIZE", 64)
+    assert any("DETECT_IMG_SIZE" in w for w in config.validate_config())

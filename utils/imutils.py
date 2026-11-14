@@ -31,6 +31,18 @@ def csv_safe(value) -> str:
     return text
 
 
+def csv_unescape(value) -> str:
+    """还原 csv_safe() 添加的引导单引号，保证读回来的姓名与原始姓名一致。
+
+    否则姓名以 = + - @ 开头的学生，签到记录里的键会多一个单引号，
+    与特征库/名单中的姓名对不上，导致每天都被判为缺勤、每日去重也失效。
+    """
+    text = "" if value is None else str(value)
+    if len(text) > 1 and text[0] == "'" and text[1] in ("=", "+", "-", "@"):
+        return text[1:]
+    return text
+
+
 def sanitize_filename(name: str) -> str:
     """把学生姓名转换为安全的文件名。
 
